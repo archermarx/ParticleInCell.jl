@@ -27,8 +27,9 @@ struct Particles
     x::Vector{Float64}
     vx::Vector{Float64}
     vy::Vector{Float64}
-    Fx::Vector{Float64}
-    Fy::Vector{Float64}
+    Ex::Vector{Float64}
+    Ey::Vector{Float64}
+    Bz::Vector{Float64}
     num_particles::Int
 end
 
@@ -42,10 +43,11 @@ function Particles(num_particles::Int, max_particles::Int, grid::Grid)
     # Initial velocities and forces are zero
     vx = zeros(max_particles)
     vy = zeros(max_particles)
-    Fx = zeros(max_particles)
-    Fy = zeros(max_particles)
+    Ex = zeros(max_particles)
+    Ey = zeros(max_particles)
+    Bz = zeros(max_particles)
 
-    return Particles(x, vx, vy, Fx, Fy, num_particles)
+    return Particles(x, vx, vy, Ex, Ey, Bz, num_particles)
 end
 
 function distribute_particles(num_particles, max_particles, grid)
@@ -83,8 +85,6 @@ function Fields(num_gridpts::Int)
     return Fields(ρ, jx, jy, Ex, Ey, ϕ, Bz)
 end
 
-
-
 """
     push_particles!(x, vx, vy, Fx, Fy, num_particles)
 Push particles to new positions `x` and velocities `v` as a result of forces `F`.
@@ -99,18 +99,28 @@ Uses a leapfrog scheme. Note that all quantities are normalized.
 `Δt`: time step
 `num_particles`: the number of particles in the simulation
 """
-function push_particles!(particles::Particles, Δt)
+function push_particles!(new_particles::Particles, particles::Particles, Δt)
+
+    (;x, vx, vy, Ex, Ey, Bz, num_particles) = particles
 
     # Loop through all particles in simulation and push them to new positions and velocities
-    for i in 1:particles.num_particles
-        # 1. Update velocity to time n+1/2
-        # v_i^{n+1/2} = v_i^{n-1/2} + F_i^n Δt
-        particles.vx[i] += particles.Fx[i] * Δt
-        particles.vy[i] += particles.Fy[i] * Δt
+    for i in 1:num_particles
 
-        # 2. Update position to time n+1
-        # x_i^{n+1} = x_i^{n} + v_i^{n+1/2}Δt
-        particles.x[i] += particles.vx[i] * Δt
+        t = Bz[i] * Δt / 2
+        s = 2 * t / (1 + t^2)
+
+        v_minus_x = vx[i] + 0.5 * Ex[i] * Δt
+        v_minus_y = vy[i] + 0.5 * Ey[i] * Δt
+
+        v_star_x = v_minus_x + v_minus_y * t
+        v_star_y = v_minus_y - v_minus_x * t
+
+        v_plus_x = v_minus_x + v_star_y * s
+        v_plus_y = v_minus_y - v_star_x * s
+
+        new_particles.vx[i] = v_plus_x + 0.5 * Ex[i] * Δt
+        new_particles.vy[i] = v_plus_y + 0.5 * Ey[i] * Δt
+        new_particles.x[i]  = x[i] + new_particles.vx[i] * Δt
     end
 
     return nothing
@@ -172,27 +182,19 @@ function interpolate_charge_to_grid!(particles::Particles, field::Fields, grid::
     return nothing
 end
 
-function interpolate_forces_to_particles!(particles::Particles, fields::Fields, grid::Grid)
+function interpolate_fields_to_particles!(particles::Particles, fields::Fields, grid::Grid)
     (; Δx, num_gridpts, xmin) = grid
-    (; num_particles, x, vx, vy, Fx, Fy) = particles
+    (; num_particles, x, vx, vy) = particles
     (; Ex, Ey, Bz) = fields
 
     for i in 1:num_particles
         # Find cell center closest to but less than x[i]
         j, j_plus_1, δⱼ, δⱼ₊₁ = linear_weighting(x[i], Δx, xmin, num_gridpts)
 
-        # Compute forces on grid points
-        # x forces
-        Fxⱼ = Ex[j] + vx[j] * Bz[j]
-        Fxⱼ₊₁ = Ex[j_plus_1] + vx[j_plus_1] * Bz[j_plus_1]
-
-        # y forces
-        Fyⱼ = Ey[j] - vy[j] * Bz[j]
-        Fyⱼ₊₁ = Ey[j_plus_1] - vy[j_plus_1] * Bz[j_plus_1]
-
-        # Interpolate forces on grid points to particles
-        Fx[i] = δⱼ * Fxⱼ + δⱼ₊₁ * Fxⱼ₊₁
-        Fy[i] = δⱼ * Fyⱼ + δⱼ₊₁ * Fyⱼ₊₁
+        # Interpolate fields on grid points to particles
+        particles.Ex[i] = δⱼ * Ex[j] + δⱼ₊₁ * Ex[j_plus_1]
+        particles.Ey[i] = δⱼ * Ey[j] + δⱼ₊₁ * Ey[j_plus_1]
+        particles.Bz[i] = δⱼ * Bz[j] + δⱼ₊₁ * Bz[j_plus_1]
     end
 
     return nothing
@@ -209,10 +211,12 @@ function initialize(num_particles, max_particles, num_gridpts, xmin, xmax)
     return particles, fields, grid
 end
 
-function update!(particles::Particles, fields::Fields, grid::Grid, Δt)
+update!(particles, fields, grid, Δt) = update!(particles, fields, particles, fields, grid, Δt)
+
+function update!(new_particles::Particles, new_fields::Fields, particles::Particles, fields::Fields, grid::Grid, Δt)
 
     # Push particles to new positions and velocities
-    push_particles!(particles, Δt)
+    push_particles!(new_particles, particles, Δt)
 
     # Interpolate charge density to grid
     interpolate_charge_to_grid!(particles, fields, grid)
@@ -221,7 +225,7 @@ function update!(particles::Particles, fields::Fields, grid::Grid, Δt)
     #solve_fields_on_grid!(fields, grid)
 
     # Interpolate forces to particles
-    interpolate_forces_to_particles!(particles, fields, grid)
+    interpolate_fields_to_particles!(particles, fields, grid)
 
     return nothing
 end

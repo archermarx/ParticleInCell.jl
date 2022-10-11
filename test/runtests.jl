@@ -13,21 +13,23 @@ using Test
     num_particles = num_gridpts
     max_particles = 2*num_particles
     particles = ParticleInCell.Particles(num_particles, max_particles, grid)
-    (;x, vx, vy, Fx, Fy) = particles
+    (;x, vx, vy, Ex, Ey, Bz) = particles
 
     # Check that arrays have correct length
     @test length(x) == max_particles
     @test length(vx) == max_particles
     @test length(vy) == max_particles
-    @test length(Fx) == max_particles
-    @test length(Fy) == max_particles
+    @test length(Ex) == max_particles
+    @test length(Ey) == max_particles
+    @test length(Bz) == max_particles
     @test particles.num_particles == num_particles
 
     # Check that velocities and forces are correctly initialized
     @test all(vx .== 0.0)
     @test all(vy .== 0.0)
-    @test all(Fx .== 0.0)
-    @test all(Fy .== 0.0)
+    @test all(Ex .== 0.0)
+    @test all(Ey .== 0.0)
+    @test all(Bz .== 0.0)
 
     # Check that positions are uniformly-distributed
     @test isapprox(x[1], xmin, atol = sqrt(eps(Float64)))
@@ -171,8 +173,9 @@ end
     x0 = copy(particles.x)
     vx0 = copy(particles.vx)
     vy0 = copy(particles.vy)
-    Fx0 = copy(particles.Fx)
-    Fy0 = copy(particles.Fy)
+    Ex0_particle = copy(particles.Ex)
+    Ey0_particle = copy(particles.Ey)
+    Bz0_particle = copy(particles.Bz)
 
     ρ0 = copy(fields.ρ)
     Ex0 = copy(fields.Ex)
@@ -194,8 +197,9 @@ end
     @test all(vy0 .≈ particles.vy)
 
     # Check that forces on particles have not changed
-    @test all(Fx0 .≈ particles.Fx)
-    @test all(Fy0 .≈ particles.Fy)
+    @test all(Ex0_particle .≈ particles.Ex)
+    @test all(Ey0_particle .≈ particles.Ey)
+    @test all(Bz0_particle .≈ particles.Bz)
 
     # Check that fields have not changed
     @test all(ρ0 .≈ fields.ρ)
@@ -205,4 +209,53 @@ end
     @test all(jy0 .≈ fields.jy)
     @test all(ϕ0 .≈ fields.ϕ)
     @test all(Bz0 .≈ fields.Bz)
+end
+
+
+@testset "Particle pusher" begin
+
+    # test neutrality on gyro-orbits (single particle)
+    num_particles = 1
+    num_gridpts = 10
+
+    grid = ParticleInCell.Grid(;xmin = 0.0, xmax = 2.0, num_gridpts)
+    particles = ParticleInCell.Particles(num_particles, num_particles, grid)
+
+    # particle has y velocity of 1 and the background magnetic field has strength 1
+    particles.vy[1] = 1.0
+
+    Bz = 1.0
+    particles.Bz[1] = 1.0
+
+    @test particles.x[1] ≈ 1.0
+    @test particles.Ex[1] ≈ 0.0
+    @test particles.Ey[1] ≈ 0.0
+
+    @test length(particles.x) == 1
+
+    tmax = 2*π
+    num_timesteps = 100
+    Δt = tmax / num_timesteps
+
+    particle_cache = [deepcopy(particles) for i in 1:num_timesteps+1]
+    for i in 1:num_timesteps
+        # push particles
+        ParticleInCell.push_particles!(particle_cache[i+1], particle_cache[i], Δt)
+    end
+
+    velocity_magnitudes = [hypot(p.vx[1],p.vy[1]) for p in particle_cache]
+
+    # check that velocity magnitude has not changed from 1 (i.e. that energy is conserved)
+    @test all(velocity_magnitudes .≈ 1)
+
+    xs = [p.x[1] for p in particle_cache]
+    vxs = [p.vx[1] for p in particle_cache]
+    vys = [p.vy[1] for p in particle_cache]
+    ts = LinRange(0, tmax, num_timesteps+1)
+
+    # check against analytic solutions
+    @test all(@. isapprox(vys, cos(ts), atol = 1 / num_timesteps))
+    @test all(@. isapprox(vxs, sin(ts), atol = 1 / num_timesteps))
+
+    # TODO: verify position
 end
