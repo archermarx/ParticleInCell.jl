@@ -143,6 +143,11 @@ function interpolate_charge_to_grid!(particles::Particles, field::Fields, grid::
 
     W = num_gridpts / num_particles
 
+    # zero charge and current densities
+    ρ .= 0.0
+    jx .= 0.0
+    jy .= 0.0
+
     for i in 1:num_particles
 
         # Find cell center closest to but less than x[i]

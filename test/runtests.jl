@@ -155,6 +155,7 @@ end
     end
 end
 
+# If particles are initialized uniformly, they shouldn't move at all.
 @testset "No self-acceleration" begin
     xmin = 0.0
     xmax = 1.0
@@ -173,6 +174,14 @@ end
     Fx0 = copy(particles.Fx)
     Fy0 = copy(particles.Fy)
 
+    ρ0 = copy(fields.ρ)
+    Ex0 = copy(fields.Ex)
+    Ey0 = copy(fields.Ey)
+    jx0 = copy(fields.jx)
+    jy0 = copy(fields.jy)
+    ϕ0 = copy(fields.ϕ)
+    Bz0 = copy(fields.Bz)
+
     # Run for num_timesteps timesteps to make sure nothing changes
     num_timesteps = 100
     for i in 1:num_timesteps
@@ -184,7 +193,16 @@ end
     @test all(vx0 .≈ particles.vx)
     @test all(vy0 .≈ particles.vy)
 
-    # Check that forces have not changed
+    # Check that forces on particles have not changed
     @test all(Fx0 .≈ particles.Fx)
     @test all(Fy0 .≈ particles.Fy)
+
+    # Check that fields have not changed
+    @test all(ρ0 .≈ fields.ρ)
+    @test all(Ex0 .≈ fields.Ex)
+    @test all(Ey0 .≈ fields.Ey)
+    @test all(jx0 .≈ fields.jx)
+    @test all(jy0 .≈ fields.jy)
+    @test all(ϕ0 .≈ fields.ϕ)
+    @test all(Bz0 .≈ fields.Bz)
 end
