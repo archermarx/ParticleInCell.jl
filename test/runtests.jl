@@ -7,8 +7,9 @@ using Test
 
     grid = ParticleInCell.Grid(;xmin, xmax, num_gridpts)
 
-    # 1. When number of particles equals number of grid points, then particles are initialized
-    # on cell centers
+    # 1. When number of particles equals number of grid points, then particles are
+    # initialized on cell centers (not hard-coded, but the way i distribute particles)
+    # should have this property
     num_particles = num_gridpts
     max_particles = 2*num_particles
     particles = ParticleInCell.Particles(num_particles, max_particles, grid)
@@ -57,7 +58,7 @@ end
 
     (;ρ, jx, jy, Ex, Ey, Bz, ϕ) = fields
 
-    # Check that arrays are correctly initialized
+    # Check that arrays are correctly initialized to zero
     @test ρ == zeros(num_gridpts)
     @test jx == zeros(num_gridpts)
     @test jy == zeros(num_gridpts)
@@ -107,18 +108,21 @@ end
     W = 1 / particles_per_cell
 
     for t in 0.01:0.01:0.99
+        # Make sure that this weighing scheme properly locates particles off of the right boundary
         j, j_plus_1, δⱼ, δⱼ₊₁ = ParticleInCell.linear_weighting(xmin - t * Δx, Δx, xmin, num_gridpts)
         @test j == num_gridpts
         @test j_plus_1 == 1
         @test δⱼ ≈ t  / Δx
         @test δⱼ₊₁ ≈ (1 - t) / Δx
 
+        # Make sure that this weighing scheme properly locates particles off of the left boundary
         j, j_plus_1, δⱼ, δⱼ₊₁ = ParticleInCell.linear_weighting(xmax + t * Δx, Δx, xmin, num_gridpts)
         @test j == num_gridpts
         @test j_plus_1 == 1
         @test δⱼ ≈ (1 - t) / Δx
         @test δⱼ₊₁ ≈ t / Δx
 
+        # Check for interior points
         for i in 1:num_gridpts-1
             xi = xmin + (i - 1) * Δx
             j, j_plus_1, δⱼ, δⱼ₊₁ = ParticleInCell.linear_weighting(xi + t * Δx, Δx, xmin, num_gridpts)
