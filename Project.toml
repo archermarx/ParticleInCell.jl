@@ -1,0 +1,4 @@
+name = "ParticleInCell"
+uuid = "c776d8b6-c1a5-4036-aea2-b58db35e096b"
+authors = ["Thomas Marks <marksta@umich.edu>"]
+version = "0.1.0"
