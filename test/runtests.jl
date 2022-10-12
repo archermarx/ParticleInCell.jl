@@ -149,11 +149,11 @@ end
         particles, fields, grid = ParticleInCell.initialize(num_particles, max_particles, num_gridpts, xmin, xmax)
 
         # check that charge density is equal to 1 when particles are uniformly initialized
-        @test all(isapprox.(fields.ρ, 1.0, rtol = 1/particles_per_cell))
+        @test all(isapprox.(fields.ρ, 1.0, rtol = 1/particles_per_cell^2))
 
         # check that current denstiy is zero
-        @test all(isapprox.(fields.jx, 0.0, rtol = 1/particles_per_cell))
-        @test all(isapprox.(fields.jy, 0.0, rtol = 1/particles_per_cell))
+        @test all(isapprox.(fields.jx, 0.0, rtol = 1/particles_per_cell^2))
+        @test all(isapprox.(fields.jy, 0.0, rtol = 1/particles_per_cell^2))
     end
 end
 
@@ -217,8 +217,10 @@ end
     # test neutrality on gyro-orbits (single particle)
     num_particles = 1
     num_gridpts = 10
+    xmin = -2.0
+    xmax = 2.0
 
-    grid = ParticleInCell.Grid(;xmin = 0.0, xmax = 2.0, num_gridpts)
+    grid = ParticleInCell.Grid(;xmin, xmax, num_gridpts)
     particles = ParticleInCell.Particles(num_particles, num_particles, grid)
 
     # particle has y velocity of 1 and the background magnetic field has strength 1
@@ -227,7 +229,7 @@ end
     Bz = 1.0
     particles.Bz[1] = 1.0
 
-    @test particles.x[1] ≈ 1.0
+    @test particles.x[1] ≈ 0.5 * (xmin + xmax)
     @test particles.Ex[1] ≈ 0.0
     @test particles.Ey[1] ≈ 0.0
 
