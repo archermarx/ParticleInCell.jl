@@ -212,7 +212,7 @@ end
 end
 
 
-@testset "Particle pusher" begin
+@testset "Gyro orbit preservation (particle pusher)" begin
 
     # test neutrality on gyro-orbits (single particle)
     num_particles = 1
