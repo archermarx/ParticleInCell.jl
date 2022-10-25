@@ -113,17 +113,6 @@ end
 
 """
     push_particles!(x, vx, vy, Fx, Fy, num_particles)
-Push particles to new positions `x` and velocities `v` as a result of forces `F`.
-Uses a leapfrog scheme. Note that all quantities are normalized.
-====
-# Arguments
-`x`: x-locations of each particle
-`vx`: velocities of each particle in x direction
-`vy`: velocities of each particle in y direction
-`Fx`: forces on each particle in x direction
-`Fy`: forces on each particle in y direction
-`Δt`: time step
-`num_particles`: the number of particles in the simulation
 """
 function push_particles!(new_particles::Particles, particles::Particles, Δt)
 
@@ -196,7 +185,6 @@ function interpolate_charge_to_grid!(particles::Particles, field::Fields, grid::
         ρ[j] += δρⱼ
         ρ[j_plus_1] += δρⱼ₊₁
 
-
         # assign x current density using linear weighting
         jx[j] += δρⱼ * vx[i]
         jx[j_plus_1] += δρⱼ₊₁ * vx[i]
@@ -238,7 +226,7 @@ function initialize(num_particles, max_particles, num_gridpts, xmin, xmax)
     fields = Fields(num_gridpts)
 
     # Compute initial charge density and fields
-    update!(particles, fields, particles, fields, grid, 0.0)
+    update!(particles, fields, particles, fields, grid, 0.0, push_particles=false)
 
     return particles, fields, grid
 end
@@ -290,10 +278,12 @@ Perform one update step, which itself has four sub-steps
 3. Solve electric field and potential on grid
 4. Interpolate electric and magnetic fields to particles
 """
-function update!(new_particles::Particles, new_fields::Fields, particles::Particles, fields::Fields, grid::Grid, Δt)
+function update!(new_particles::Particles, new_fields::Fields, particles::Particles, fields::Fields, grid::Grid, Δt; push_particles=true)
 
-    # Push particles to new positions and velocities
-    push_particles!(new_particles, particles, Δt)
+    if push_particles
+        # Push particles to new positions and velocities
+        push_particles!(new_particles, particles, Δt)
+    end
 
     # Interpolate charge density to grid
     interpolate_charge_to_grid!(new_particles, new_fields, grid)

@@ -1,7 +1,8 @@
 using ParticleInCell
 using Test
 using Plots
-
+using Statistics
+using FFTW
 
 function allapprox(x::AbstractVector{T1}, y::AbstractVector{T2}, atol = sqrt(max(eps(T1), eps(T2)))) where {T1, T2}
     return all(isapprox.(x, y, atol=atol))
@@ -269,4 +270,44 @@ end
     # check against analytic solutions
     @test all(@. isapprox(vys, cos(ts), atol = 1 / num_timesteps))
     @test all(@. isapprox(vxs, sin(ts), atol = 1 / num_timesteps))
+end
+
+
+function test_two_particle_oscillation(num_gridpts, xmax, perturbation, max_time)
+    xmin = 0.0
+    Δx = (xmax - xmin) / num_gridpts
+    Δt = 0.1
+    num_particles = 2
+    max_particles = 2
+    num_timesteps = ceil(Int, max_time/Δt)
+
+    particles, fields, grid = ParticleInCell.initialize(num_particles, max_particles, num_gridpts, xmin, xmax)
+
+    x1s = zeros(num_timesteps)
+    x2s = zeros(num_timesteps)
+    v1s = zeros(num_timesteps)
+    v2s = zeros(num_timesteps)
+
+    particles.x[1] += perturbation
+    particles.x[2] -= perturbation
+
+    for i in 1:num_timesteps
+        ParticleInCell.update!(particles, fields, particles, fields, grid, Δx)
+        x1s[i] = particles.x[1]
+        x2s[i] = particles.x[2]
+        v1s[i] = particles.vx[1]
+        v2s[i] = particles.vx[2]
+    end
+
+    #=p = plot()
+    plot!(x1s,LinRange(0, Δt * num_timesteps, num_timesteps), label = "x₁", xlims = (xmin, xmax))
+    plot!(x2s, LinRange(0, Δt * num_timesteps, num_timesteps), label = "x₂")
+    hline!(LinRange(0, 5, 6) * 2π, lc = :red, linestyle = :dash, label = "", legend = :outertop)
+    vline!([mean(x1s), mean(x2s)], lw = 2, lc = :black, label = "Mean positions")
+    display(p)=#
+end
+
+@testset "Two-particle harmonic oscillation" begin
+    # TODO: this seems dependent on the grid size and timestep
+    test_two_particle_oscillation(101, 1.0, 2e-1, 10π)
 end
