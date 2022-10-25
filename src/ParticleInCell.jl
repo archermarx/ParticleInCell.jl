@@ -26,8 +26,11 @@ function Grid(; xmin, xmax, Δx=nothing, num_gridpts=nothing)
     # Compute domain length
     L = xmax - xmin + Δx
 
+    kmax = π / Δx
+
     # Compute grid in frequency domain
-    k = 2π * fftfreq(num_gridpts)
+    k = 2π * fftfreq(num_gridpts) * num_gridpts
+
     K = zeros(length(k))
     κ = zeros(length(k))
     for j in eachindex(k)

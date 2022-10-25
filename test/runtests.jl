@@ -195,7 +195,7 @@ end
     # Run for num_timesteps timesteps to make sure nothing changes
     num_timesteps = 100
     for i in 1:num_timesteps
-        ParticleInCell.update!(particles, fields, particles, fields, grid, Δx)
+        ParticleInCell.update!(particles, fields, particles, fields, grid, Δt)
     end
 
     # Check that particle positions and momenta have not changed
@@ -216,10 +216,6 @@ end
     @test allapprox(jy0, fields.jy)
     @test allapprox(ϕ0, fields.ϕ)
     @test allapprox(Bz0, fields.Bz)
-
-    p = plot(Ex0, label = "Initial")
-    plot!(fields.Ex, label = "Final")
-    display(p)
 end
 
 
@@ -276,7 +272,7 @@ end
 function test_two_particle_oscillation(num_gridpts, xmax, perturbation, max_time)
     xmin = 0.0
     Δx = (xmax - xmin) / num_gridpts
-    Δt = 0.1
+    Δt = 0.01
     num_particles = 2
     max_particles = 2
     num_timesteps = ceil(Int, max_time/Δt)
@@ -292,22 +288,28 @@ function test_two_particle_oscillation(num_gridpts, xmax, perturbation, max_time
     particles.x[2] -= perturbation
 
     for i in 1:num_timesteps
-        ParticleInCell.update!(particles, fields, particles, fields, grid, Δx)
+        ParticleInCell.update!(particles, fields, particles, fields, grid, Δt)
+
+        if i == 1
+            display(plot(fields.ϕ))
+        end
         x1s[i] = particles.x[1]
         x2s[i] = particles.x[2]
         v1s[i] = particles.vx[1]
         v2s[i] = particles.vx[2]
     end
 
-    #=p = plot()
+    p = plot()
     plot!(x1s,LinRange(0, Δt * num_timesteps, num_timesteps), label = "x₁", xlims = (xmin, xmax))
     plot!(x2s, LinRange(0, Δt * num_timesteps, num_timesteps), label = "x₂")
-    hline!(LinRange(0, 5, 6) * 2π, lc = :red, linestyle = :dash, label = "", legend = :outertop)
+    hline!(LinRange(0, max_time, round(Int, max_time/2π + 1)), lc = :red, linestyle = :dash, label = "", legend = :outertop)
     vline!([mean(x1s), mean(x2s)], lw = 2, lc = :black, label = "Mean positions")
-    display(p)=#
+    display(p)
 end
 
 @testset "Two-particle harmonic oscillation" begin
-    # TODO: this seems dependent on the grid size and timestep
-    test_two_particle_oscillation(101, 1.0, 2e-1, 10π)
+    xmax = 1.0
+    perturbation = 0.2*xmax
+
+    test_two_particle_oscillation(11, xmax, perturbation, 2π)
 end
