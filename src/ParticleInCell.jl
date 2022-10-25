@@ -3,6 +3,7 @@ module ParticleInCell
 using FFTW
 
 struct Grid
+    x::AbstractVector{Float64}
     xmin::Float64
     xmax::Float64
     Δx::Float64
@@ -26,7 +27,7 @@ function Grid(; xmin, xmax, Δx=nothing, num_gridpts=nothing)
     # Compute domain length
     L = xmax - xmin + Δx
 
-    kmax = π / Δx
+    x = LinRange(xmin, xmax, num_gridpts)
 
     # Compute grid in frequency domain
     k = 2π * fftfreq(num_gridpts) / Δx
@@ -37,7 +38,7 @@ function Grid(; xmin, xmax, Δx=nothing, num_gridpts=nothing)
         κ[j] = k[j] * sinc(k[j] * Δx / π)
     end
 
-    return Grid(xmin, xmax, Δx, L, num_gridpts, k, K, κ)
+    return Grid(x, xmin, xmax, Δx, L, num_gridpts, k, K, κ)
 end
 
 struct Particles
@@ -78,6 +79,14 @@ function distribute_particles(num_particles, max_particles, grid)
     end
 
     return x
+end
+
+function perturb!(particles, amplitude, wavenumber)
+    for i in eachindex(particles.x)
+        δx = amplitude / wavenumber * cos(wavenumber * particles.x[i])
+        particles.x[i] += δx
+    end
+    return nothing
 end
 
 struct Fields

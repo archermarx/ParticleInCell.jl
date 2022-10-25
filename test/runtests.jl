@@ -304,15 +304,6 @@ function test_two_particle_oscillation(num_gridpts, xmax, perturbation, max_time
         v2s[i] = particles.vx[2]
     end
 
-    #=
-    p = plot()
-    plot!(x1s,LinRange(0, Δt * num_timesteps, num_timesteps), label = "x₁", xlims = (xmin-Δx/2, xmax+Δx/2))
-    plot!(x2s, LinRange(0, Δt * num_timesteps, num_timesteps), label = "x₂")
-    hline!(LinRange(0, max_time, round(Int, max_time/2π + 1)), lc = :red, linestyle = :dash, label = "", legend = :outertop)
-    vline!([mean(x1s), mean(x2s)], lw = 2, lc = :black, label = "Mean positions")
-    display(p)
-    =#
-
     # Get p2p amplitude of oscillation
     a1 = maximum(x1s) - minimum(x1s)
     a2 = maximum(x2s) - minimum(x2s)
@@ -343,6 +334,42 @@ end
                 @test isapprox(a1, 2*perturbation*xmax, rtol=0.01)
                 @test isapprox(a2, 2*perturbation*xmax, rtol=0.01)
             end
+        end
+    end
+end
+
+@testset "Density computation with perturbation" begin
+    # This test checks that if we perturb all particle positions sinusoidally by a small value,
+    # then the resulting charge density should follow an expected form
+    xmin = 0.0
+    xmax = 1.0
+    Δx = 0.01
+    Δt = 0.01
+    particles_per_cell = 50
+    num_gridpts = 101
+    num_particles = particles_per_cell * num_gridpts
+    max_particles = 3 * num_particles
+
+    for perturb_amp in [0.02, 0.01, 0.005, 0.001]
+        for perturb_k in [2π, 4π, 6π, 8π, 10π]
+
+            particles, fields, grid = ParticleInCell.initialize(num_particles, max_particles, num_gridpts, xmin, xmax)
+
+            ρ0 = mean(fields.ρ)
+
+            ParticleInCell.perturb!(particles, perturb_amp, perturb_k)
+            ParticleInCell.interpolate_charge_to_grid!(particles, fields, grid)
+
+            ρ_computed = fields.ρ
+            ρ_expected = ρ0 .+ perturb_amp .* sin.(perturb_k .* grid.x)
+
+            #=
+            p = plot(grid.x, ρ_expected, label = "Expected charge density")
+            plot!(grid.x, fields.ρ, label = "Calculated charge density", legend = :outertop)
+            display(p)
+            =#
+
+            @test sum(((ρ_computed .- ρ_expected) / num_gridpts).^2) < sqrt(eps(Float64))
         end
     end
 end
