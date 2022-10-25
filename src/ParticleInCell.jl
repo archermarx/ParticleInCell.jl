@@ -8,6 +8,10 @@ struct Grid
     Δx::Float64
     L::Float64
     num_gridpts::Int
+    # Grid in frequency domain
+    k::Vector{Float64}
+    K::Vector{Float64}
+    κ::Vector{Float64}
 end
 
 function Grid(; xmin, xmax, Δx=nothing, num_gridpts=nothing)
@@ -19,8 +23,19 @@ function Grid(; xmin, xmax, Δx=nothing, num_gridpts=nothing)
         num_gridpts = length(xs)
     end
 
+    # Compute domain length
     L = xmax - xmin + Δx
-    return Grid(xmin, xmax, Δx, L, num_gridpts)
+
+    # Compute grid in frequency domain
+    k = 2π * fftfreq(num_gridpts)
+    K = zeros(length(k))
+    κ = zeros(length(k))
+    for j in eachindex(k)
+        K[j] = k[j] * sinc(k[j] * Δx / 2π)
+        κ[j] = k[j] * sinc(k[j] * Δx / π)
+    end
+
+    return Grid(xmin, xmax, Δx, L, num_gridpts, k, K, κ)
 end
 
 struct Particles
@@ -71,6 +86,11 @@ struct Fields
     Ey::Vector{Float64}
     ϕ::Vector{Float64}
     Bz::Vector{Float64}
+    # FFT quantities
+    ρ̃::Vector{Complex{Float64}}
+    ϕ̃::Vector{Complex{Float64}}
+    Ẽx::Vector{Complex{Float64}}
+    Ẽy::Vector{Complex{Float64}}
 end
 
 function Fields(num_gridpts::Int)
@@ -82,7 +102,13 @@ function Fields(num_gridpts::Int)
     ϕ = zeros(num_gridpts)
     Bz = zeros(num_gridpts)
 
-    return Fields(ρ, jx, jy, Ex, Ey, ϕ, Bz)
+    # Allocate arrays for fourier quantities
+    ρ̃ = zeros(Complex{Float64}, num_gridpts)
+    ϕ̃ = zeros(Complex{Float64}, num_gridpts)
+    Ẽx = zeros(Complex{Float64}, num_gridpts)
+    Ẽy = zeros(Complex{Float64}, num_gridpts)
+
+    return Fields(ρ, jx, jy, Ex, Ey, ϕ, Bz, ρ̃, ϕ̃, Ẽx, Ẽy)
 end
 
 """
@@ -149,7 +175,7 @@ function interpolate_charge_to_grid!(particles::Particles, field::Fields, grid::
 
     (; num_gridpts, Δx, xmin) = grid
     (; num_particles, x, vx, vy) = particles
-    (; ρ, jx, jy) = field
+    (; ρ, jx, jy, ρ̃) = field
 
     W = num_gridpts / num_particles
 
@@ -170,6 +196,7 @@ function interpolate_charge_to_grid!(particles::Particles, field::Fields, grid::
         ρ[j] += δρⱼ
         ρ[j_plus_1] += δρⱼ₊₁
 
+
         # assign x current density using linear weighting
         jx[j] += δρⱼ * vx[i]
         jx[j_plus_1] += δρⱼ₊₁ * vx[i]
@@ -184,7 +211,7 @@ end
 
 function interpolate_fields_to_particles!(particles::Particles, fields::Fields, grid::Grid)
     (; Δx, num_gridpts, xmin) = grid
-    (; num_particles, x, vx, vy) = particles
+    (; num_particles, x) = particles
     (; Ex, Ey, Bz) = fields
 
     for i in 1:num_particles
@@ -200,32 +227,82 @@ function interpolate_fields_to_particles!(particles::Particles, fields::Fields, 
     return nothing
 end
 
+"""
+Initialize simulation, aka allocate arrays for grid, particles, and fields
+Then distribute particles and compute the initial fields
+"""
 function initialize(num_particles, max_particles, num_gridpts, xmin, xmax)
 
     grid = Grid(;num_gridpts, xmin, xmax)
     particles = Particles(num_particles, max_particles, grid)
     fields = Fields(num_gridpts)
 
-    update!(particles, fields, grid, 0.0)
+    # Compute initial charge density and fields
+    update!(particles, fields, particles, fields, grid, 0.0)
 
     return particles, fields, grid
 end
 
-update!(particles, fields, grid, Δt) = update!(particles, fields, particles, fields, grid, Δt)
 
+"""
+Use FFT to compute potential and electric field using charge density
+"""
+function solve_fields_on_grid!(fields::Fields, grid::Grid)
+    (;num_gridpts, K, κ) = grid
+    (;ρ, ρ̃, Ex, Ey, ϕ, Ẽx, ϕ̃) = fields
+
+    # Compute FFT of density
+    ρ̃ .= ρ
+    fft!(ρ̃)
+
+    # Compute potential and electric field in frequency domain
+    for j in 1:num_gridpts
+        if K[j] == 0.0
+            ϕ̃[j] = 0.0
+        else
+            ϕ̃[j]  = ρ̃[j] / K[j]^2
+        end
+
+        if κ[j] == 0.0
+            Ẽx[j] = 0.0
+        else
+            Ẽx[j] = -im * κ[j] * ϕ̃[j]
+        end
+    end
+
+    # Compute inverse fourier transforms
+    ifft!(ϕ̃)
+    ifft!(Ẽx)
+
+    for j in 1:num_gridpts
+        ϕ[j] = real(ϕ̃[j])
+        Ex[j] = real(Ẽx[j])
+        Ey[j] = 0.0     # No electric field in y direction
+    end
+
+    return nothing
+end
+
+"""
+Perform one update step, which itself has four sub-steps
+1. Push particles to new positions and velocities
+2. Interpolate charge and current density to grid
+3. Solve electric field and potential on grid
+4. Interpolate electric and magnetic fields to particles
+"""
 function update!(new_particles::Particles, new_fields::Fields, particles::Particles, fields::Fields, grid::Grid, Δt)
 
     # Push particles to new positions and velocities
     push_particles!(new_particles, particles, Δt)
 
     # Interpolate charge density to grid
-    interpolate_charge_to_grid!(particles, fields, grid)
+    interpolate_charge_to_grid!(new_particles, new_fields, grid)
 
     # Solve eletric fields on grid
-    #solve_fields_on_grid!(fields, grid)
+    solve_fields_on_grid!(new_fields, grid)
 
-    # Interpolate forces to particles
-    interpolate_fields_to_particles!(particles, fields, grid)
+    # Interpolate electric and magnetic fields to particles
+    interpolate_fields_to_particles!(new_particles, new_fields, grid)
 
     return nothing
 end

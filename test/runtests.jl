@@ -1,5 +1,11 @@
 using ParticleInCell
 using Test
+using Plots
+
+
+function allapprox(x::AbstractVector{T1}, y::AbstractVector{T2}, atol = sqrt(max(eps(T1), eps(T2)))) where {T1, T2}
+    return all(isapprox.(x, y, atol=atol))
+end
 
 @testset "Particle initialization" begin
     xmin, xmax = 0.0, 1.0
@@ -188,27 +194,31 @@ end
     # Run for num_timesteps timesteps to make sure nothing changes
     num_timesteps = 100
     for i in 1:num_timesteps
-        ParticleInCell.update!(particles, fields, grid, Δx)
+        ParticleInCell.update!(particles, fields, particles, fields, grid, Δx)
     end
 
     # Check that particle positions and momenta have not changed
-    @test all(x0 .≈ particles.x)
-    @test all(vx0 .≈ particles.vx)
-    @test all(vy0 .≈ particles.vy)
+    @test allapprox(x0, particles.x)
+    @test allapprox(vx0, particles.vx)
+    @test allapprox(vy0, particles.vy)
 
     # Check that forces on particles have not changed
-    @test all(Ex0_particle .≈ particles.Ex)
-    @test all(Ey0_particle .≈ particles.Ey)
-    @test all(Bz0_particle .≈ particles.Bz)
+    @test allapprox(Ex0_particle, particles.Ex)
+    @test allapprox(Ey0_particle, particles.Ey)
+    @test allapprox(Bz0_particle, particles.Bz)
 
     # Check that fields have not changed
-    @test all(ρ0 .≈ fields.ρ)
-    @test all(Ex0 .≈ fields.Ex)
-    @test all(Ey0 .≈ fields.Ey)
-    @test all(jx0 .≈ fields.jx)
-    @test all(jy0 .≈ fields.jy)
-    @test all(ϕ0 .≈ fields.ϕ)
-    @test all(Bz0 .≈ fields.Bz)
+    @test allapprox(ρ0, fields.ρ)
+    @test allapprox(Ex0, fields.Ex)
+    @test allapprox(Ey0, fields.Ey)
+    @test allapprox(jx0, fields.jx)
+    @test allapprox(jy0, fields.jy)
+    @test allapprox(ϕ0, fields.ϕ)
+    @test allapprox(Bz0, fields.Bz)
+
+    p = plot(Ex0, label = "Initial")
+    plot!(fields.Ex, label = "Final")
+    display(p)
 end
 
 
@@ -250,6 +260,7 @@ end
     # check that velocity magnitude has not changed from 1 (i.e. that energy is conserved)
     @test all(velocity_magnitudes .≈ 1)
 
+    # extract x, vx, vy, t
     xs = [p.x[1] for p in particle_cache]
     vxs = [p.vx[1] for p in particle_cache]
     vys = [p.vy[1] for p in particle_cache]
@@ -258,6 +269,4 @@ end
     # check against analytic solutions
     @test all(@. isapprox(vys, cos(ts), atol = 1 / num_timesteps))
     @test all(@. isapprox(vxs, sin(ts), atol = 1 / num_timesteps))
-
-    # TODO: verify position
 end
