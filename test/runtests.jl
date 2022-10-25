@@ -8,6 +8,15 @@ function allapprox(x::AbstractVector{T1}, y::AbstractVector{T2}, atol = sqrt(max
     return all(isapprox.(x, y, atol=atol))
 end
 
+function compute_frequency(signal, Δt)
+    N = length(signal)
+    fs = 1 / Δt
+    F = abs.(fftshift(fft(signal))[N÷2+1:end])
+    freqs = fftshift(fftfreq(N, fs))[N÷2+1:end]
+    peak_freq = freqs[argmax(F)]
+    return freqs, F, peak_freq
+end
+
 @testset "Particle initialization" begin
     xmin, xmax = 0.0, 1.0
     num_gridpts = 100
@@ -249,7 +258,7 @@ end
     particle_cache = [deepcopy(particles) for i in 1:num_timesteps+1]
     for i in 1:num_timesteps
         # push particles
-        ParticleInCell.push_particles!(particle_cache[i+1], particle_cache[i], Δt)
+        ParticleInCell.push_particles!(particle_cache[i+1], particle_cache[i], grid, Δt)
     end
 
     velocity_magnitudes = [hypot(p.vx[1],p.vy[1]) for p in particle_cache]
@@ -272,7 +281,7 @@ end
 function test_two_particle_oscillation(num_gridpts, xmax, perturbation, max_time)
     xmin = 0.0
     Δx = (xmax - xmin) / num_gridpts
-    Δt = 0.01
+    Δt = 0.1
     num_particles = 2
     max_particles = 2
     num_timesteps = ceil(Int, max_time/Δt)
@@ -289,27 +298,51 @@ function test_two_particle_oscillation(num_gridpts, xmax, perturbation, max_time
 
     for i in 1:num_timesteps
         ParticleInCell.update!(particles, fields, particles, fields, grid, Δt)
-
-        if i == 1
-            display(plot(fields.ϕ))
-        end
         x1s[i] = particles.x[1]
         x2s[i] = particles.x[2]
         v1s[i] = particles.vx[1]
         v2s[i] = particles.vx[2]
     end
 
+    #=
     p = plot()
-    plot!(x1s,LinRange(0, Δt * num_timesteps, num_timesteps), label = "x₁", xlims = (xmin, xmax))
+    plot!(x1s,LinRange(0, Δt * num_timesteps, num_timesteps), label = "x₁", xlims = (xmin-Δx/2, xmax+Δx/2))
     plot!(x2s, LinRange(0, Δt * num_timesteps, num_timesteps), label = "x₂")
     hline!(LinRange(0, max_time, round(Int, max_time/2π + 1)), lc = :red, linestyle = :dash, label = "", legend = :outertop)
     vline!([mean(x1s), mean(x2s)], lw = 2, lc = :black, label = "Mean positions")
     display(p)
+    =#
+
+    # Get p2p amplitude of oscillation
+    a1 = maximum(x1s) - minimum(x1s)
+    a2 = maximum(x2s) - minimum(x2s)
+
+    # Get peak freq of oscillation
+    _, _, f1 = compute_frequency(x1s .- mean(x1s), Δt)
+    _, _, f2 = compute_frequency(x2s .- mean(x2s), Δt)
+    return f1, f2, a1, a2
 end
 
 @testset "Two-particle harmonic oscillation" begin
-    xmax = 1.0
-    perturbation = 0.2*xmax
+    # Check that two particles exhibit simple harmonic motion with frequency ω = 1 rad/s
+    # This should be the same for all grid resolutions and domain sizes
+    for xmax in [0.01, 0.05, 0.1, 0.5, 1.0]
+        for perturbation in [0.01, 0.1, 0.15, 0.2]
+            for num_gridpts in [11, 31, 51, 71, 101]
+                f1, f2, a1, a2 = test_two_particle_oscillation(num_gridpts, xmax, perturbation * xmax, 6π)
 
-    test_two_particle_oscillation(11, xmax, perturbation, 2π)
+                # Convert frequency to rad/s
+                ω1 = 2π * f1
+                ω2 = 2π * f2
+
+                # Check that peak freqency is 1 rad/s
+                @test isapprox(ω1, 1, atol=0.01)
+                @test isapprox(ω2, 1, atol=0.01)
+
+                # check that oscillatory amplitude is 2 * perturbation
+                @test isapprox(a1, 2*perturbation*xmax, rtol=0.01)
+                @test isapprox(a2, 2*perturbation*xmax, rtol=0.01)
+            end
+        end
+    end
 end

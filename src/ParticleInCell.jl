@@ -29,8 +29,7 @@ function Grid(; xmin, xmax, Δx=nothing, num_gridpts=nothing)
     kmax = π / Δx
 
     # Compute grid in frequency domain
-    k = 2π * fftfreq(num_gridpts) * num_gridpts
-
+    k = 2π * fftfreq(num_gridpts) / Δx
     K = zeros(length(k))
     κ = zeros(length(k))
     for j in eachindex(k)
@@ -114,12 +113,11 @@ function Fields(num_gridpts::Int)
     return Fields(ρ, jx, jy, Ex, Ey, ϕ, Bz, ρ̃, ϕ̃, Ẽx, Ẽy)
 end
 
-"""
-    push_particles!(x, vx, vy, Fx, Fy, num_particles)
-"""
-function push_particles!(new_particles::Particles, particles::Particles, Δt)
+
+function push_particles!(new_particles::Particles, particles::Particles, grid::Grid, Δt)
 
     (;x, vx, vy, Ex, Ey, Bz, num_particles) = particles
+    (;xmin, xmax, Δx, L) = grid
 
     # Loop through all particles in simulation and push them to new positions and velocities
     for i in 1:num_particles
@@ -138,7 +136,17 @@ function push_particles!(new_particles::Particles, particles::Particles, Δt)
 
         new_particles.vx[i] = v_plus_x + 0.5 * Ex[i] * Δt
         new_particles.vy[i] = v_plus_y + 0.5 * Ey[i] * Δt
-        new_particles.x[i]  = x[i] + new_particles.vx[i] * Δt
+
+        x_new = x[i] + new_particles.vx[i] * Δt
+
+        # Apply periodic boundary conditions for particles
+        if x_new > (xmax + Δx / 2)
+            x_new -= L
+        elseif x_new < (xmin - Δx / 2)
+            x_new += L
+        end
+
+        new_particles.x[i] = x_new
     end
 
     return nothing
@@ -285,7 +293,7 @@ function update!(new_particles::Particles, new_fields::Fields, particles::Partic
 
     if push_particles
         # Push particles to new positions and velocities
-        push_particles!(new_particles, particles, Δt)
+        push_particles!(new_particles, particles, grid, Δt)
     end
 
     # Interpolate charge density to grid
