@@ -3,6 +3,7 @@ using Test
 using Plots
 using Statistics
 using FFTW
+using Plots.PlotMeasures
 
 function allapprox(x::AbstractVector{T1}, y::AbstractVector{T2}, atol = sqrt(max(eps(T1), eps(T2)))) where {T1, T2}
     return all(isapprox.(x, y, atol=atol))
@@ -48,8 +49,8 @@ end
     @test all(Bz .== 0.0)
 
     # Check that positions are uniformly-distributed
-    @test isapprox(x[1], xmin, atol = sqrt(eps(Float64)))
-    @test isapprox(x[num_particles], xmax, atol = sqrt(eps(Float64)))
+    @test isapprox(x[1], xmin+grid.Δx/2, atol = sqrt(eps(Float64)))
+    @test isapprox(x[num_particles], xmax-grid.Δx/2, atol = sqrt(eps(Float64)))
     @test all(x[num_particles+1:end] .== 0.0)
     @test all(diff(x[1:num_particles]) .≈ grid.Δx)
 
@@ -89,11 +90,10 @@ end
 @testset "Grid initialization" begin
     xmin = 5.0
     xmax = 10.0
-    num_gridpts = 6
+    num_gridpts = 5
 
-    @test ParticleInCell.Grid(;xmin, xmax, Δx = 1.0).num_gridpts == num_gridpts
     @test ParticleInCell.Grid(;xmin, xmax, num_gridpts).Δx == 1.0
-    @test ParticleInCell.Grid(;xmin, xmax, num_gridpts).L == 6.0
+    @test ParticleInCell.Grid(;xmin, xmax, num_gridpts).L == 5.0
 end
 
 @testset "Particle location" begin
@@ -288,6 +288,7 @@ function test_two_particle_oscillation(num_gridpts, xmax, perturbation, max_time
 
     particles, fields, grid = ParticleInCell.initialize(num_particles, max_particles, num_gridpts, xmin, xmax)
 
+    ts = LinRange(0, max_time / 2π, num_timesteps)
     x1s = zeros(num_timesteps)
     x2s = zeros(num_timesteps)
     v1s = zeros(num_timesteps)
@@ -317,10 +318,14 @@ end
 @testset "Two-particle harmonic oscillation" begin
     # Check that two particles exhibit simple harmonic motion with frequency ω = 1 rad/s
     # This should be the same for all grid resolutions and domain sizes
-    for xmax in [0.01, 0.05, 0.1, 0.5, 1.0]
-        for perturbation in [0.01, 0.1, 0.15, 0.2]
+    for xmax in [0.01, 0.05, 0.1, 0.5, 1.0, π, 2π]
+        #=
+        num_gridpts = 101
+        perturbation = 0.1
+        =#
+        for perturbation in [0.01, 0.02, 0.05, 0.1]
             for num_gridpts in [11, 31, 51, 71, 101]
-                f1, f2, a1, a2 = test_two_particle_oscillation(num_gridpts, xmax, perturbation * xmax, 6π)
+                f1, f2, a1, a2 = test_two_particle_oscillation(num_gridpts, xmax, perturbation * xmax, 2π)
 
                 # Convert frequency to rad/s
                 ω1 = 2π * f1
@@ -342,34 +347,150 @@ end
     # This test checks that if we perturb all particle positions sinusoidally by a small value,
     # then the resulting charge density should follow an expected form
     xmin = 0.0
-    xmax = 1.0
     Δx = 0.01
     Δt = 0.01
-    particles_per_cell = 50
+    particles_per_cell = 51
     num_gridpts = 101
+    num_particles = particles_per_cell * num_gridpts
+    max_particles = 1 * num_particles
+
+    for xmax in [0.1, 1.0, π]
+        Δx = (xmax - xmin) / num_gridpts
+        L = xmax - xmin + Δx
+        for perturb_amp in [0.015, 0.01, 0.005, 0.001]
+            for perturb_k in [1, 2, 3, 4, 5]
+                particles, fields, grid = ParticleInCell.initialize(
+                    num_particles, max_particles, num_gridpts, xmin, xmax,
+                    perturbation_amplitude = perturb_amp, perturbation_wavenumber = perturb_k
+                )
+
+                ρ0 = mean(fields.ρ)
+
+                ρ_computed = fields.ρ
+                ρ_expected = ρ0 .+ perturb_amp .* sin.(2π * perturb_k .* grid.x / L)
+
+                #=
+                p = plot(grid.x, ρ_expected, label = "Expected charge density")
+                plot!(grid.x, fields.ρ, label = "Calculated charge density", legend = :outertop)
+                display(p)
+                =#
+
+                @test sum(((ρ_computed .- ρ_expected) / num_gridpts).^2) < sqrt(eps(Float64))
+            end
+        end
+    end
+end
+
+@testset "Periodic BCs on moving uniform charge" begin
+    xmin = 0.0
+    xmax = 1.0
+    Δx = 1.0
+    Δt = 0.01
+    particles_per_cell = 2
+    num_gridpts = 11
     num_particles = particles_per_cell * num_gridpts
     max_particles = 3 * num_particles
 
-    for perturb_amp in [0.02, 0.01, 0.005, 0.001]
-        for perturb_k in [2π, 4π, 6π, 8π, 10π]
+    particles, fields, grid = ParticleInCell.initialize(num_particles, max_particles, num_gridpts, xmin, xmax)
 
-            particles, fields, grid = ParticleInCell.initialize(num_particles, max_particles, num_gridpts, xmin, xmax)
-
-            ρ0 = mean(fields.ρ)
-
-            ParticleInCell.perturb!(particles, perturb_amp, perturb_k)
-            ParticleInCell.interpolate_charge_to_grid!(particles, fields, grid)
-
-            ρ_computed = fields.ρ
-            ρ_expected = ρ0 .+ perturb_amp .* sin.(perturb_k .* grid.x)
-
-            #=
-            p = plot(grid.x, ρ_expected, label = "Expected charge density")
-            plot!(grid.x, fields.ρ, label = "Calculated charge density", legend = :outertop)
-            display(p)
-            =#
-
-            @test sum(((ρ_computed .- ρ_expected) / num_gridpts).^2) < sqrt(eps(Float64))
-        end
+    # add rightward-moving velocity to all particles
+    for i in 1:num_particles
+        particles.vx[i] = 1.0
     end
+
+    num_timesteps = 100
+
+    E_cache = zeros(num_gridpts, num_timesteps+1)
+    ρ_cache = zeros(num_gridpts, num_timesteps+1)
+    x_cache = zeros(max_particles, num_timesteps+1)
+    vx_cache = zeros(max_particles, num_timesteps+1)
+
+    E_cache[:, 1] = fields.Ex
+    ρ_cache[:, 1] = fields.ρ
+    x_cache[:, 1] = particles.x
+    vx_cache[:, 1] = particles.vx
+
+    for i in 2:num_timesteps+1
+        ParticleInCell.update!(particles, fields, grid, Δt)
+        E_cache[:, i] = copy(fields.Ex)
+        ρ_cache[:, i] = copy(fields.ρ)
+        x_cache[:, i] = copy(particles.x)
+        vx_cache[:, i] = copy(particles.vx)
+    end
+
+    @test allapprox(E_cache[:, end], E_cache[:, 1])
+    @test allapprox(ρ_cache[:, end], ρ_cache[:, 1])
+    @test allapprox(vx_cache[:, end], vx_cache[:, 1])
+
+    #=p = plot(ρ_cache[:, 1], label = "t = 0", ylims = [0.0, 1.0])
+    plot!(ρ_cache[:, 41], label = "t = $Δt", legend = :outertop)
+    display(p)=#
+end
+
+function worksheet5(;N=101, N_ppc=100, xmax=π, Δt=0.1, tmax=2π, amplitude=0.01, wavenumber=1, wave_speed=1.0)
+
+    N_p = N_ppc * N
+
+    particles, fields, grid = ParticleInCell.initialize(
+        N_p, N_p*2, N, 0.0, xmax;
+        perturbation_amplitude = amplitude,
+        perturbation_wavenumber = wavenumber,
+        perturbation_speed = wave_speed,
+    )
+
+    num_timesteps = ceil(Int, tmax / Δt)
+
+    E_cache = zeros(N, num_timesteps+1)
+    δρ_cache = zeros(N, num_timesteps+1)
+    v_cache = zeros(N_p * 2, num_timesteps+1)
+    x_cache = zeros(N_p * 2, num_timesteps+1)
+
+    E_cache[:, 1] = fields.Ex
+    δρ_cache[:, 1] = fields.ρ .- 1
+    v_cache[:, 1] = particles.vx
+    x_cache[:, 1] = particles.x
+
+    for i in 2:num_timesteps+1
+        ParticleInCell.update!(particles, fields, grid, Δt)
+        E_cache[:, i] = copy(fields.Ex)
+        δρ_cache[:, i] = copy(fields.ρ) .- 1.0
+        v_cache[:, i] = copy(particles.vx)
+        x_cache[:, i] = copy(particles.x)
+    end
+
+    t = LinRange(0, tmax, num_timesteps+1)
+    dt_fac = round(Int, 0.1 / Δt) * 2
+    @show dt_fac
+    t2s = dt_fac:dt_fac:32*dt_fac
+
+    p = plot(grid.x, δρ_cache[:, 1], label = "δn₀", xlabel = "xωₚ/c", ylabel = "δn/n₀, eE/mcωₚ", color = :red, legend = :outertop)
+    #plot!(grid.x, E_cache[:, 1], label = "E₀", legend = :outertop, color = :blue)
+    for t2 in t2s
+        plot!(p, grid.x, δρ_cache[:, t2], label = "", color = :red, ls = :dash)
+        #plot!(p, grid.x, E_cache[:, t2], label = "", color = :blue, ls = :dash)
+    end
+    display(p)
+
+    #=p2 = scatter(x_cache[1:N_p, 1], v_cache[1:N_p, 1], xlabel = "xωₚ/c")
+    scatter!(x_cache[1:N_p, t2], v_cache[1:N_p, t2])
+    display(p2)=#
+
+    contour_E = contourf(t, grid.x, E_cache, xlabel = "tωₚ", ylabel = "xωₚ/c", c=:balance, linewidth=0, title = "eE / mcωₚ", right_margin=10mm)
+    contour_ρ = contourf(t, grid.x, δρ_cache, xlabel = "tωₚ", ylabel = "xωₚ/c", c=:balance, linewidth=0, title = "δn / n₀", right_margin=10mm)
+
+    display(contour_E)
+    display(contour_ρ)
+end
+
+# TODO: fix oscillation in wave envelope
+# independent of xmax
+# independent of perturbation amplitude
+# independent of gridpoints or number of particles
+# independent of wavenumber when wave_speed = 1/wavenumber
+# independent of end time
+# depends on timestep!
+
+begin
+    wavenumber = 1
+    worksheet5(N = 50 * wavenumber, N_ppc = 50*wavenumber, xmax = 2π, amplitude = 0.01, wavenumber = wavenumber, wave_speed = 1/wavenumber, tmax=4π, Δt = 0.01)
 end

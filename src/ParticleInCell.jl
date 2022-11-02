@@ -1,6 +1,8 @@
 module ParticleInCell
 
-using FFTW
+using FFTW: fft!, ifft!, ifft!, fftfreq
+using Statistics
+using Plots: plot, plot!, heatmap
 
 struct Grid
     x::AbstractVector{Float64}
@@ -15,19 +17,14 @@ struct Grid
     κ::Vector{Float64}
 end
 
-function Grid(; xmin, xmax, Δx=nothing, num_gridpts=nothing)
-    if isnothing(Δx)
-        xs = LinRange(xmin, xmax, num_gridpts)
-        Δx = step(xs)
-    elseif isnothing(num_gridpts)
-        xs = xmin:Δx:xmax
-        num_gridpts = length(xs)
-    end
+function Grid(; xmin, xmax, num_gridpts)
+
+    x_aux = LinRange(xmin, xmax, num_gridpts+1)
+    xs = [0.5 * (x_aux[i] + x_aux[i+1]) for i in 1:num_gridpts]
+    Δx = xs[2] - xs[1]
 
     # Compute domain length
-    L = xmax - xmin + Δx
-
-    x = LinRange(xmin, xmax, num_gridpts)
+    L = xmax - xmin
 
     # Compute grid in frequency domain
     k = 2π * fftfreq(num_gridpts) / Δx
@@ -38,7 +35,7 @@ function Grid(; xmin, xmax, Δx=nothing, num_gridpts=nothing)
         κ[j] = k[j] * sinc(k[j] * Δx / π)
     end
 
-    return Grid(x, xmin, xmax, Δx, L, num_gridpts, k, K, κ)
+    return Grid(xs, xmin, xmax, Δx, L, num_gridpts, k, K, κ)
 end
 
 struct Particles
@@ -71,9 +68,9 @@ end
 function distribute_particles(num_particles, max_particles, grid)
     x = zeros(max_particles)
 
-    (;xmin, xmax, Δx) = grid
+    (;xmin, xmax) = grid
 
-    x_aux = LinRange(xmin - Δx/2, xmax+Δx/2, num_particles+1)
+    x_aux = LinRange(xmin, xmax, num_particles+1)
     for i in 1:num_particles
         x[i] = 0.5*(x_aux[i]+x_aux[i+1])
     end
@@ -81,10 +78,16 @@ function distribute_particles(num_particles, max_particles, grid)
     return x
 end
 
-function perturb!(particles, amplitude, wavenumber)
+function perturb!(particles, amplitude, wavenumber, wavespeed, L)
+
+    wavenumber_aux = 2π * wavenumber / L
+    wavespeed_aux = wavespeed * L / 2π
+
     for i in eachindex(particles.x)
-        δx = amplitude / wavenumber * cos(wavenumber * particles.x[i])
+        δx = amplitude / wavenumber_aux * cos(wavenumber_aux * particles.x[i])
+        δv = wavespeed_aux * amplitude * sin(wavenumber_aux * particles.x[i])
         particles.x[i] += δx
+        particles.vx[i] += δv
     end
     return nothing
 end
@@ -126,7 +129,7 @@ end
 function push_particles!(new_particles::Particles, particles::Particles, grid::Grid, Δt)
 
     (;x, vx, vy, Ex, Ey, Bz, num_particles) = particles
-    (;xmin, xmax, Δx, L) = grid
+    (;xmin, xmax, L) = grid
 
     # Loop through all particles in simulation and push them to new positions and velocities
     for i in 1:num_particles
@@ -149,9 +152,9 @@ function push_particles!(new_particles::Particles, particles::Particles, grid::G
         x_new = x[i] + new_particles.vx[i] * Δt
 
         # Apply periodic boundary conditions for particles
-        if x_new > (xmax + Δx / 2)
+        if x_new > xmax
             x_new -= L
-        elseif x_new < (xmin - Δx / 2)
+        elseif x_new < xmin
             x_new += L
         end
 
@@ -184,14 +187,16 @@ function interpolate_charge_to_grid!(particles::Particles, field::Fields, grid::
 
     (; num_gridpts, Δx, xmin) = grid
     (; num_particles, x, vx, vy) = particles
-    (; ρ, jx, jy, ρ̃) = field
+    (; ρ, jx, jy) = field
 
     W = num_gridpts / num_particles
 
     # zero charge and current densities
-    ρ .= 0.0
-    jx .= 0.0
-    jy .= 0.0
+    for j in 1:num_gridpts
+        ρ[j] = 0.0
+        jx[j] = 0.0
+        jy[j] = 0.0
+    end
 
     for i in 1:num_particles
 
@@ -239,11 +244,14 @@ end
 Initialize simulation, aka allocate arrays for grid, particles, and fields
 Then distribute particles and compute the initial fields
 """
-function initialize(num_particles, max_particles, num_gridpts, xmin, xmax)
+function initialize(num_particles, max_particles, num_gridpts, xmin, xmax; perturbation_amplitude = 0.0, perturbation_wavenumber = 2π, perturbation_speed = 0.0)
 
     grid = Grid(;num_gridpts, xmin, xmax)
     particles = Particles(num_particles, max_particles, grid)
     fields = Fields(num_gridpts)
+
+    # Perturb particle positions
+    perturb!(particles, perturbation_amplitude, perturbation_wavenumber, perturbation_speed, grid.L)
 
     # Compute initial charge density and fields
     update!(particles, fields, particles, fields, grid, 0.0, push_particles=false)
@@ -316,5 +324,10 @@ function update!(new_particles::Particles, new_fields::Fields, particles::Partic
 
     return nothing
 end
+
+function update!(particles::Particles, fields::Fields, grid::Grid, Δt; push_particles = true)
+    update!(particles, fields, particles, fields, grid, Δt; push_particles)
+end
+
 
 end # module ParticleInCell
