@@ -56,17 +56,23 @@ function Particles(num_particles::Int, max_particles::Int, grid::Grid)
     x = distribute_particles(num_particles, max_particles, grid)
 
     # Initial velocities and forces are zero
-    vx = zeros(max_particles)
-    vy = zeros(max_particles)
-    Ex = zeros(max_particles)
-    Ey = zeros(max_particles)
-    Bz = zeros(max_particles)
+    vx = fill(NaN, max_particles)
+    vy = fill(NaN, max_particles)
+    Ex = fill(NaN, max_particles)
+    Ey = fill(NaN, max_particles)
+    Bz = fill(NaN, max_particles)
+
+    vx[1:num_particles] .= 0.0
+    vy[1:num_particles] .= 0.0
+    Ex[1:num_particles] .= 0.0
+    Ey[1:num_particles] .= 0.0
+    Bz[1:num_particles] .= 0.0
 
     return Particles(x, vx, vy, Ex, Ey, Bz, num_particles)
 end
 
 function distribute_particles(num_particles, max_particles, grid)
-    x = zeros(max_particles)
+    x = fill(NaN, max_particles)
 
     (;xmin, xmax) = grid
 
@@ -84,10 +90,19 @@ function perturb!(particles, amplitude, wavenumber, wavespeed, L)
     wavespeed_aux = wavespeed * L / 2π
 
     for i in eachindex(particles.x)
+        isnan(particles.x[i]) && continue # make sure we only perturb particles that exist
         δx = amplitude / wavenumber_aux * cos(wavenumber_aux * particles.x[i])
         δv = wavespeed_aux * amplitude * sin(wavenumber_aux * particles.x[i])
         particles.x[i] += δx
         particles.vx[i] += δv
+    end
+    return nothing
+end
+
+function maxwellian_vdf!(particles, thermal_velocity)
+    for i in eachindex(particles.vx)
+        isnan(particles.vx[i]) && continue # no particle at this index
+        particles.vx[i] = randn() * thermal_velocity
     end
     return nothing
 end

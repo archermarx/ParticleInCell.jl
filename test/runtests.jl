@@ -3,6 +3,7 @@ using Test
 using Plots
 using Statistics
 using FFTW
+using StatsBase
 using Plots.PlotMeasures
 
 function allapprox(x::AbstractVector{T1}, y::AbstractVector{T2}, atol = sqrt(max(eps(T1), eps(T2)))) where {T1, T2}
@@ -427,7 +428,7 @@ end
     display(p)=#
 end
 
-function worksheet5(;N=101, N_ppc=100, xmax=π, Δt=0.1, tmax=2π, amplitude=0.01, wavenumber=1, wave_speed=1.0)
+function cold_plasma_wave(;N=101, N_ppc=100, xmax=π, Δt=0.1, tmax=2π, amplitude=0.01, wavenumber=1, wave_speed=1.0, suffix)
 
     N_p = N_ppc * N
 
@@ -435,7 +436,7 @@ function worksheet5(;N=101, N_ppc=100, xmax=π, Δt=0.1, tmax=2π, amplitude=0.0
         N_p, N_p*2, N, 0.0, xmax;
         perturbation_amplitude = amplitude,
         perturbation_wavenumber = wavenumber,
-        perturbation_speed = wave_speed,
+        perturbation_speed = wave_speed / wavenumber,
     )
 
     num_timesteps = ceil(Int, tmax / Δt)
@@ -459,28 +460,17 @@ function worksheet5(;N=101, N_ppc=100, xmax=π, Δt=0.1, tmax=2π, amplitude=0.0
     end
 
     t = LinRange(0, tmax, num_timesteps+1)
-    dt_fac = round(Int, 0.1 / Δt) * 2
-    @show dt_fac
-    t2s = dt_fac:dt_fac:32*dt_fac
-
-    p = plot(grid.x, δρ_cache[:, 1], label = "δn₀", xlabel = "xωₚ/c", ylabel = "δn/n₀, eE/mcωₚ", color = :red, legend = :outertop)
-    #plot!(grid.x, E_cache[:, 1], label = "E₀", legend = :outertop, color = :blue)
-    for t2 in t2s
-        plot!(p, grid.x, δρ_cache[:, t2], label = "", color = :red, ls = :dash)
-        #plot!(p, grid.x, E_cache[:, t2], label = "", color = :blue, ls = :dash)
-    end
-    display(p)
-
-    #=p2 = scatter(x_cache[1:N_p, 1], v_cache[1:N_p, 1], xlabel = "xωₚ/c")
-    scatter!(x_cache[1:N_p, t2], v_cache[1:N_p, t2])
-    display(p2)=#
 
     contour_E = contourf(t, grid.x, E_cache, xlabel = "tωₚ", ylabel = "xωₚ/c", c=:balance, linewidth=0, title = "eE / mcωₚ", right_margin=10mm)
     contour_ρ = contourf(t, grid.x, δρ_cache, xlabel = "tωₚ", ylabel = "xωₚ/c", c=:balance, linewidth=0, title = "δn / n₀", right_margin=10mm)
 
     display(contour_E)
     display(contour_ρ)
+
+    savefig(contour_E, "E_$(suffix).svg")
+    savefig(contour_ρ, "n_$(suffix).svg")
 end
+
 
 # TODO: fix oscillation in wave envelope
 # independent of xmax
@@ -491,6 +481,72 @@ end
 # depends on timestep!
 
 begin
-    wavenumber = 1
-    worksheet5(N = 50 * wavenumber, N_ppc = 50*wavenumber, xmax = 2π, amplitude = 0.01, wavenumber = wavenumber, wave_speed = 1/wavenumber, tmax=4π, Δt = 0.01)
+    cold_plasma_wave(suffix = "travelling_k=1", N = 50 * wavenumber, N_ppc = 50*wavenumber, xmax = 2π, amplitude = 0.01, wavenumber = 1, wave_speed = 1, tmax=4π, Δt = 0.01)
+    cold_plasma_wave(suffix = "standing_k=1", N = 50 * wavenumber, N_ppc = 50*wavenumber, xmax = 2π, amplitude = 0.01, wavenumber = 1, wave_speed = 0, tmax=4π, Δt = 0.01)
+    cold_plasma_wave(suffix = "travelling_k=2", N = 50 * wavenumber, N_ppc = 50*wavenumber, xmax = 2π, amplitude = 0.01, wavenumber = 2, wave_speed = 1, tmax=4π, Δt = 0.01)
+    cold_plasma_wave(suffix = "standing_k=2", N = 50 * wavenumber, N_ppc = 50*wavenumber, xmax = 2π, amplitude = 0.01, wavenumber = 2, wave_speed = 0, tmax=4π, Δt = 0.01)
+end
+
+kinetic_energy(particles, L) = 0.5 / L * sum(v^2 for v in particles.vx if !isnan(v)) / particles.num_particles
+
+function phase_space_density(particles)
+    histogram2d(particles.x, particles.vx, xlabel = "x/ωpc", ylabel = "v/c", title = "Particle distribution", normalize=true)
+end
+
+function plasma_heating(;N=101, N_ppc=50, xmax=2π, Δt=0.1, tmax=4π, thermal_velocity=0.025, save_every=1)
+    N_p = N_ppc * N
+
+    particles, fields, grid = ParticleInCell.initialize(
+        N_p, N_p*2, N, 0.0, xmax;
+        perturbation_amplitude = 0.0
+    )
+
+    ParticleInCell.maxwellian_vdf!(particles, thermal_velocity)
+
+    p = histogram(particles.vx, normalize=true, label = "Particle vdf")
+
+    vs = -0.1:0.001:0.1
+    fs = @. exp(-0.5 * (vs/thermal_velocity)^2)/√(2π)/thermal_velocity
+    plot!(p, vs, fs, label = "Maxwellian", lw = 2)
+    display(p)
+
+    p2 = phase_space_density(particles)
+    display(p2)
+
+    num_timesteps = ceil(Int, tmax / Δt)
+
+    E_cache = zeros(N, num_timesteps+1)
+    δρ_cache = zeros(N, num_timesteps+1)
+    v_cache = zeros(N_p * 2, num_timesteps+1)
+    x_cache = zeros(N_p * 2, num_timesteps+1)
+    T_cache = zeros(num_timesteps+1)
+
+    E_cache[:, 1] = fields.Ex
+    δρ_cache[:, 1] = fields.ρ .- 1
+    v_cache[:, 1] = particles.vx
+    x_cache[:, 1] = particles.x
+    T_cache[1] = kinetic_energy(particles, xmax)
+
+    for i in 2:num_timesteps+1
+        ParticleInCell.update!(particles, fields, grid, Δt)
+        E_cache[:, i] = copy(fields.Ex)
+        δρ_cache[:, i] = copy(fields.ρ) .- 1.0
+        v_cache[:, i] = copy(particles.vx)
+        x_cache[:, i] = copy(particles.x)
+        T_cache[i] = kinetic_energy(particles, xmax)
+    end
+
+    t = LinRange(0, tmax, num_timesteps+1)
+
+    contour_E = heatmap(t[1:save_every:end], grid.x, E_cache[:, 1:save_every:end], xlabel = "tωₚ", ylabel = "xωₚ/c", c=:balance, linewidth=0, title = "eE / mcωₚ", right_margin=10mm)
+    contour_ρ = heatmap(t[1:save_every:end], grid.x, δρ_cache[:, 1:save_every:end], xlabel = "tωₚ", ylabel = "xωₚ/c", c=:balance, linewidth=0, title = "δn / n₀", right_margin=10mm)
+
+    display(contour_E)
+    display(contour_ρ)
+
+    plot(t, T_cache, xlabel = "tωₚ", ylabel = "Kinetic energy", label = "", yscale = :log10)
+end
+
+begin
+    plasma_heating(N = 128, N_ppc=8, thermal_velocity=0.025, tmax = 400π, Δt =0.1, xmax = 6, save_every=5)
 end
