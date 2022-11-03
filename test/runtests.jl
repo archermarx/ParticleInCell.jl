@@ -5,6 +5,8 @@ using Statistics
 using FFTW
 using StatsBase
 using Plots.PlotMeasures
+using LsqFit
+
 
 function allapprox(x::AbstractVector{T1}, y::AbstractVector{T2}, atol = sqrt(max(eps(T1), eps(T2)))) where {T1, T2}
     return all(isapprox.(x, y, atol=atol))
@@ -43,16 +45,16 @@ end
     @test particles.num_particles == num_particles
 
     # Check that velocities and forces are correctly initialized
-    @test all(vx .== 0.0)
-    @test all(vy .== 0.0)
-    @test all(Ex .== 0.0)
-    @test all(Ey .== 0.0)
-    @test all(Bz .== 0.0)
+    @test all(vx[1:num_particles] .== 0.0) && all(isnan, vx[num_particles+1:end])
+    @test all(vy[1:num_particles] .== 0.0) && all(isnan, vy[num_particles+1:end])
+    @test all(Ex[1:num_particles] .== 0.0) && all(isnan, Ex[num_particles+1:end])
+    @test all(Ey[1:num_particles] .== 0.0) && all(isnan, Ey[num_particles+1:end])
+    @test all(Bz[1:num_particles] .== 0.0) && all(isnan, Bz[num_particles+1:end])
 
     # Check that positions are uniformly-distributed
     @test isapprox(x[1], xmin+grid.Δx/2, atol = sqrt(eps(Float64)))
     @test isapprox(x[num_particles], xmax-grid.Δx/2, atol = sqrt(eps(Float64)))
-    @test all(x[num_particles+1:end] .== 0.0)
+    @test all(isnan, x[num_particles+1:end])
     @test all(diff(x[1:num_particles]) .≈ grid.Δx)
 
     # 2. Otherwise, the distance between particles is still uniform
@@ -183,7 +185,7 @@ end
     particles_per_cell = 5
     num_gridpts = 101
     num_particles = particles_per_cell * num_gridpts
-    max_particles = 3 * num_particles
+    max_particles = num_particles
 
     particles, fields, grid = ParticleInCell.initialize(num_particles, max_particles, num_gridpts, xmin, xmax)
 
@@ -227,7 +229,6 @@ end
     @test allapprox(ϕ0, fields.ϕ)
     @test allapprox(Bz0, fields.Bz)
 end
-
 
 @testset "Gyro orbit preservation (particle pusher)" begin
 
@@ -390,7 +391,7 @@ end
     particles_per_cell = 2
     num_gridpts = 11
     num_particles = particles_per_cell * num_gridpts
-    max_particles = 3 * num_particles
+    max_particles = num_particles
 
     particles, fields, grid = ParticleInCell.initialize(num_particles, max_particles, num_gridpts, xmin, xmax)
 
@@ -472,28 +473,17 @@ function cold_plasma_wave(;N=101, N_ppc=100, xmax=π, Δt=0.1, tmax=2π, amplitu
 end
 
 
-# TODO: fix oscillation in wave envelope
-# independent of xmax
-# independent of perturbation amplitude
-# independent of gridpoints or number of particles
-# independent of wavenumber when wave_speed = 1/wavenumber
-# independent of end time
-# depends on timestep!
-
 begin
-    cold_plasma_wave(suffix = "travelling_k=1", N = 50 * wavenumber, N_ppc = 50*wavenumber, xmax = 2π, amplitude = 0.01, wavenumber = 1, wave_speed = 1, tmax=4π, Δt = 0.01)
-    cold_plasma_wave(suffix = "standing_k=1", N = 50 * wavenumber, N_ppc = 50*wavenumber, xmax = 2π, amplitude = 0.01, wavenumber = 1, wave_speed = 0, tmax=4π, Δt = 0.01)
-    cold_plasma_wave(suffix = "travelling_k=2", N = 50 * wavenumber, N_ppc = 50*wavenumber, xmax = 2π, amplitude = 0.01, wavenumber = 2, wave_speed = 1, tmax=4π, Δt = 0.01)
-    cold_plasma_wave(suffix = "standing_k=2", N = 50 * wavenumber, N_ppc = 50*wavenumber, xmax = 2π, amplitude = 0.01, wavenumber = 2, wave_speed = 0, tmax=4π, Δt = 0.01)
+    # Generate plots for problem 1
+    cold_plasma_wave(suffix = "travelling_k=1", N = 50, N_ppc = 50, xmax = 2π, amplitude = 0.01, wavenumber = 1, wave_speed = 1, tmax=4π, Δt = 0.01)
+    cold_plasma_wave(suffix = "standing_k=1", N = 50, N_ppc = 50, xmax = 2π, amplitude = 0.01, wavenumber = 1, wave_speed = 0, tmax=4π, Δt = 0.01)
+    cold_plasma_wave(suffix = "travelling_k=2", N = 50, N_ppc = 50, xmax = 2π, amplitude = 0.01, wavenumber = 2, wave_speed = 1, tmax=4π, Δt = 0.01)
+    cold_plasma_wave(suffix = "standing_k=2", N = 50, N_ppc = 50, xmax = 2π, amplitude = 0.01, wavenumber = 2, wave_speed = 0, tmax=4π, Δt = 0.01)
 end
 
 kinetic_energy(particles, L) = 0.5 / L * sum(v^2 for v in particles.vx if !isnan(v)) / particles.num_particles
 
-function phase_space_density(particles)
-    histogram2d(particles.x, particles.vx, xlabel = "x/ωpc", ylabel = "v/c", title = "Particle distribution", normalize=true)
-end
-
-function plasma_heating(;N=101, N_ppc=50, xmax=2π, Δt=0.1, tmax=4π, thermal_velocity=0.025, save_every=1)
+function plasma_heating(;N=101, N_ppc=50, xmax=2π, Δt=0.1, tmax=4π, thermal_velocity=0.025)
     N_p = N_ppc * N
 
     particles, fields, grid = ParticleInCell.initialize(
@@ -502,16 +492,6 @@ function plasma_heating(;N=101, N_ppc=50, xmax=2π, Δt=0.1, tmax=4π, thermal_v
     )
 
     ParticleInCell.maxwellian_vdf!(particles, thermal_velocity)
-
-    p = histogram(particles.vx, normalize=true, label = "Particle vdf")
-
-    vs = -0.1:0.001:0.1
-    fs = @. exp(-0.5 * (vs/thermal_velocity)^2)/√(2π)/thermal_velocity
-    plot!(p, vs, fs, label = "Maxwellian", lw = 2)
-    display(p)
-
-    p2 = phase_space_density(particles)
-    display(p2)
 
     num_timesteps = ceil(Int, tmax / Δt)
 
@@ -538,15 +518,96 @@ function plasma_heating(;N=101, N_ppc=50, xmax=2π, Δt=0.1, tmax=4π, thermal_v
 
     t = LinRange(0, tmax, num_timesteps+1)
 
-    contour_E = heatmap(t[1:save_every:end], grid.x, E_cache[:, 1:save_every:end], xlabel = "tωₚ", ylabel = "xωₚ/c", c=:balance, linewidth=0, title = "eE / mcωₚ", right_margin=10mm)
-    contour_ρ = heatmap(t[1:save_every:end], grid.x, δρ_cache[:, 1:save_every:end], xlabel = "tωₚ", ylabel = "xωₚ/c", c=:balance, linewidth=0, title = "δn / n₀", right_margin=10mm)
+    # Compute the initial heating rate by fitting a line to the first 1/5th of the data
+    N = length(t) ÷ 5
+    t_reduced = t[1:N]
+    T_reduced = T_cache[1:N]
+    @. line(x, p) = p[1] * x + p[2]
+    fit = curve_fit(line, t_reduced, T_reduced, [0, T_cache[1]])
+    heating_rate = fit.param[1]
 
-    display(contour_E)
-    display(contour_ρ)
-
-    plot(t, T_cache, xlabel = "tωₚ", ylabel = "Kinetic energy", label = "", yscale = :log10)
+    return t, T_cache, heating_rate
 end
 
 begin
-    plasma_heating(N = 128, N_ppc=8, thermal_velocity=0.025, tmax = 400π, Δt =0.1, xmax = 6, save_every=5)
+    # Generate maxwellian vdf plot for problem 2
+    N_ppc = 4096
+    N_p = N * N_ppc
+    N = 1024
+    xmax = 1.0
+    thermal_velocity = 0.025
+
+    particles, fields, grid = ParticleInCell.initialize(N_p, N_p, N, 0.0, xmax)
+
+    ParticleInCell.maxwellian_vdf!(particles, thermal_velocity)
+    p = histogram2d(
+        particles.x, particles.vx,
+        xlabel = "xωₚ/c", ylabel = "v/c",
+        title = "Initial Maxwellian, 1024 cells, 4096 particles/cell",
+        normalize=true
+    )
+    hline!(
+        p, [thermal_velocity, -thermal_velocity], lw = 2, ls = :dash, lc = :blue,
+        label = "±vₜₕ", legend = :outertop
+    )
+    display(p)
+    savefig(p, "maxwellian.svg")
+end
+
+begin
+    # Generate remaining plots for problem 2
+    Ns = [8, 16, 32, 64, 128, 256]
+    N_ppcs = [1, 2, 4, 8, 16, 32, 64]
+
+    xmax = 2π
+    tmax = 400π
+    thermal_velocity = 0.025
+    Δt = 0.1
+
+    p_N = plot(;
+        yaxis = :log, legend = :outerright,
+        title = "Kinetic energy vs Δx (16 particles/cell)",
+        xlabel = "tωₚ", ylabel = "Kinetic energy (norm.)",
+    )
+
+    heating_rates = zeros(length(Ns))
+
+    for (i, N) in enumerate(Ns)
+        t, T, heating_rates[i] = plasma_heating(;N, N_ppc=16, thermal_velocity, tmax, Δt, xmax)
+        plot!(p_N, t, T, label = "Δx=2π/$N")
+    end
+
+    savefig(p_N, "heating_curve_N.svg")
+
+    display(p_N)
+    Δx = xmax ./ Ns
+    λd_Δx = @. thermal_velocity / Δx
+
+    p_rate_N = plot(
+        λd_Δx, heating_rates;
+        xlabel = "λd/Δx", ylabel = "Heating rate",
+        xaxis = :log, yaxis = :log,
+        label = "",
+        lc = :black, lw = 2, ls = :dash, title = "Heating rate vs λd/Δx"
+    )
+
+    scatter!(p_rate_N, λd_Δx, heating_rates, color = :black, label = "")
+    savefig(p_rate_N, "heating_rate.svg")
+
+    display(p_rate_N)
+
+    p_Nppc = plot(;
+        yaxis = :log, legend = :outerright,
+        title = "Kinetic energy vs particles/cell (Δx = 2π/64)",
+        xlabel = "tωₚ", ylabel = "Kinetic energy (norm.)"
+    )
+
+    for N_ppc in N_ppcs
+        t, T = plasma_heating(;N = 64, N_ppc, thermal_velocity, tmax, Δt, xmax)
+        plot!(p_Nppc, t, T, label = "Nppc=$N_ppc")
+    end
+
+    savefig(p_Nppc, "heating_curve_Nppc.svg")
+
+    display(p_Nppc)
 end
