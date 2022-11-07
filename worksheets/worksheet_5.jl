@@ -8,6 +8,8 @@ begin
     using LsqFit
 end
 
+mkpath("results/svg")
+
 function cold_plasma_wave(;N=101, N_ppc=100, xmax=π, Δt=0.1, tmax=2π, amplitude=0.01, wavenumber=1, wave_speed=1.0, suffix)
 
     N_p = N_ppc * N
