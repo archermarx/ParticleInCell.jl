@@ -261,8 +261,7 @@ let
         particles, fields, grid = ParticleInCell.initialize(N_p, N_p, N, 0.0, xmax)
 
         ParticleInCell.maxwellian_vdf!(particles, thermal_velocity)
-        ParticleInCell.perturb!(particles, amplitude, wavenumber, wave_speed/wavenumber, xmax)
-
+        ParticleInCell.perturb!(particles, amplitude, wavenumber, wave_speed, xmax)
 
         num_timesteps = ceil(Int, tmax / Δt)
 
@@ -289,8 +288,8 @@ let
 
         t = LinRange(0, tmax, num_timesteps+1)
 
-        contour_E = heatmap(t, grid.x, E_cache, xlabel = "tωₚ", ylabel = "xωₚ/c", c=:balance, linewidth=0, title = "eE / mcωₚ", right_margin=10mm)
-        contour_ρ = heatmap(t, grid.x, δρ_cache, xlabel = "tωₚ", ylabel = "xωₚ/c", c=:balance, linewidth=0, title = "δn / n₀", right_margin=10mm)
+        contour_E = contourf(t, grid.x, E_cache, xlabel = "tωₚ", ylabel = "xωₚ/c", c=:balance, linewidth=0, title = "eE / mcωₚ", right_margin=10mm, ylims = (0, xmax/20), xlims = (0, 4π))
+        contour_ρ = contourf(t, grid.x, δρ_cache, xlabel = "tωₚ", ylabel = "xωₚ/c", c=:balance, linewidth=0, title = "δn / n₀", right_margin=10mm,  ylims = (0, xmax/20), xlims = (0, 4π))
 
         savefig(contour_E, "results/E_warm_$(suffix).svg")
         savefig(contour_ρ, "results/n_warm_$(suffix).svg")
@@ -312,24 +311,25 @@ let
     tmax = 20π
 
     E_standing, ρ_standing = warm_plasma_waves(;N, N_ppc, xmax, Δt, thermal_velocity, wavenumber, wave_speed=0, tmax, suffix="standing")
-    E_travelling, ρ_travelling = warm_plasma_waves(;N, N_ppc, xmax, Δt, thermal_velocity, wavenumber, wave_speed=20*thermal_velocity, tmax, suffix="travelling")
+    E_travelling, ρ_travelling = warm_plasma_waves(;N, N_ppc, xmax, Δt, thermal_velocity, wavenumber=round(Int, 1/thermal_velocity), wave_speed=thermal_velocity, tmax, suffix="travelling")
 
     Nt = size(E_travelling, 2)
     @show Nt
     ks = (2π * fftshift(fftfreq(N, 1/Δx)))[N÷2+1:end]
     ωs = (2π * fftshift(fftfreq(Nt, 1/Δt)))[Nt÷2+1:end]
 
-    kmax = 60
-    ωmax = π
 
-    last_ω_ind = findfirst(>(ωmax), ωs)
-    last_k_ind = findfirst(>(kmax), ks)
-
-    ks = ks[2:last_k_ind]
-    ωs = ωs[1:last_ω_ind]
-
-    for (ρ, E, suffix) in zip([ρ_standing, ρ_travelling], [E_standing, E_travelling], ["standing", "travelling"])
+    for (ρ, E, suffix, kmax) in zip([ρ_standing, ρ_travelling], [E_standing, E_travelling], ["standing", "travelling"], [40, 100])
         for (q, name) in zip([ρ, E], ["n", "E"])
+
+            kmax = 100
+            ωmax = π
+
+            last_ω_ind = findfirst(>(ωmax), ωs)
+            last_k_ind = findfirst(>(kmax), ks)
+
+            ks = ks[2:last_k_ind]
+            ωs = ωs[1:last_ω_ind]
 
             q̃ = (abs.(fftshift(fft(q))).^2)[N÷2+1:end, Nt÷2+1:end]'[1:last_ω_ind, 2:last_k_ind]
 
