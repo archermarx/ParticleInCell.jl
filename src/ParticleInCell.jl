@@ -344,5 +344,4 @@ function update!(particles::Particles, fields::Fields, grid::Grid, Δt; push_par
     update!(particles, fields, particles, fields, grid, Δt; push_particles)
 end
 
-
 end # module ParticleInCell
