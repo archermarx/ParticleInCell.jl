@@ -319,17 +319,58 @@ begin
             animate_vdf(vxs, vys; suffix, frameskip=2, type="2D", vlims = (-0.25, 0.25), ts = t)
         end
 
+        n_amplitude = zeros(length(t))
+        E_amplitude = zeros(length(t))
+        for i in 1:length(t)
+            n_amplitude[i] = max(abs.(extrema(n[:, i]))...)
+            E_amplitude[i] = max(abs.(extrema(E[:, i]))...)
+        end
+
+        p_growth = plot(;
+            xlabel = "tωp", ylabel = "Perturbation amplitude (arb.)", yaxis = :log,
+            size = (1080, 1080),
+            titlefontsize=FONT_SIZE*3÷2,
+            legendfontsize=FONT_SIZE,
+            xtickfontsize=FONT_SIZE,
+            ytickfontsize=FONT_SIZE,
+            xguidefontsize=FONT_SIZE,
+            yguidefontsize=FONT_SIZE,
+            framestyle=:box,
+            legend = :bottomright,
+            margin = 10Plots.mm,
+            ylims = (3e-6, 3e0)
+        )
+
+
+        plot!(t, n_amplitude, label = "n", lw = 2, lc = :red)
+        plot!(t, E_amplitude, label = "E", lw = 2, lc = :blue)
+
+        if suffix == "ring_stable" || suffix == "ring_unstable"
+
+            if suffix == "ring_stable"
+                γ_expected = 0.0
+            elseif suffix == "ring_unstable"
+                γ_expected = 0.265 / √(10)
+            end
+            E_ind = 580
+            n_ind = 677
+            expected_growth_n = @. n_amplitude[n_ind] * exp(γ_expected * (t - t[n_ind]))
+            expected_growth_E = @. E_amplitude[E_ind] * exp(γ_expected * (t - t[E_ind]))
+            
+            plot!(t, expected_growth_n, label = "Expected (n)", ls = :dash, lw = 2, lc = :red)
+            plot!(t, expected_growth_E, label = "Expected (E)", ls = :dash, lw = 2, lc = :blue)
+        end
+        
+        display(p_growth)
+
         contour_E = heatmap(t, x, E; xlabel = "tωₚ", ylabel = "xωₚ/c", c=:balance, linewidth=0, title = "eE / mcωₚ", size=plot_size, margin=20Plots.mm, PLOT_SCALING_OPTIONS...)        
         contour_ρ = heatmap(t, x, n; xlabel = "tωₚ", ylabel = "xωₚ/c", c=:plasma, linewidth=0, title = "δn / n₀", size=plot_size, margin=20Plots.mm, PLOT_SCALING_OPTIONS...)
-
-        display(contour_E)
-        display(contour_ρ)
 
         savefig(contour_E, "$(WS6_RESULTS_DIR)/E_$(suffix).png")
         savefig(contour_ρ, "$(WS6_RESULTS_DIR)/n_$(suffix).png")
     end
 
-    animate = true
+    animate = false
 
     t, x_stable, xs_stable, vxs_stable, vys_stable, n_stable, E_stable = magnetized_ring(1 / √(5))
     plot_magnetized_ring(t, x_stable, xs_stable, vxs_stable, vys_stable, n_stable, E_stable; animate, suffix = "ring_stable")
