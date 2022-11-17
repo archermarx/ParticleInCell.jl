@@ -1,6 +1,7 @@
 using ParticleInCell
 using Plots
 using Printf
+using Revise
 
 const WS6_RESULTS_DIR = mkpath("results/worksheet_6")
 const VERTICAL_RES = 1080
@@ -47,9 +48,6 @@ begin
     vxs = [p.vx[] for p in particle_cache]
     vys = [p.vy[] for p in particle_cache]
 
-    @show vxs
-    @show vys
-
     # check that velocity magnitude has not changed from 1 (i.e. that energy is conserved)
     @show all(velocity_magnitudes .≈ 1)
 
@@ -79,66 +77,6 @@ begin
     display(p)
 
     savefig(p, joinpath(WS6_RESULTS_DIR, "problem1.png"))
-end
-
-function plot_vdf(vx, vy; type="1D", vlims, t = nothing)
-
-    pad_amount = 0.1
-    
-    ylims = vlims
-
-    if isnothing(t)
-        t_str = ""
-    else
-        t_str = @sprintf(", tωₚ = %.1f", t)
-    end
-
-    if type == "1D"
-        title = "f(x, v)" * t_str
-        xlabel = "x"
-        ylabel = "v"
-        xmin, xmax = extrema(vx)
-        pad = pad_amount * (xmax - xmin)
-        xlims = (xmin - pad, xmax+pad)
-        aspect_ratio = :auto
-    elseif type == "2D"
-        title = "f(vx, vy)" * t_str
-        xlabel = "vx"
-        ylabel = "vy"
-        xlims = ylims
-        aspect_ratio = 1
-    end
-
-    p = plot(;
-        size = (1080, 1080),
-        titlefontsize=FONT_SIZE*3÷2,
-        legendfontsize=FONT_SIZE÷1.5,
-        xtickfontsize=FONT_SIZE,
-        ytickfontsize=FONT_SIZE,
-        xguidefontsize=FONT_SIZE,
-        yguidefontsize=FONT_SIZE,
-        framestyle=:box,
-    )
-    scatter!(p, 
-        vx, vy; 
-        xlims, ylims, 
-        msw = 0, mc = :black, ms = 1.0, 
-        title, xlabel, ylabel,
-        label = "",
-        aspect_ratio
-    )
-
-    return p
-end
-
-function animate_vdf(vx, vy; ts, suffix = "", frameskip=0, type = "1D", kwargs...)
-
-    anim = Animation()
-    for i in 1:(1+frameskip):size(vx, 2)
-        p = plot_vdf(vx[:, i], vy[:, i]; t = ts[i], type, kwargs...)
-        frame(anim)
-    end
-    gif(anim, joinpath(WS6_RESULTS_DIR, "anim_vdf_$(type)_$(suffix).mp4"))
 end
 
 
@@ -214,30 +152,13 @@ begin
         savefig(contour_E, "$(WS6_RESULTS_DIR)/E_$(suffix).png")
         savefig(contour_ρ, "$(WS6_RESULTS_DIR)/n_$(suffix).png")
 
-        # make vdf, density, electric field animations
-
-        # 2D vdf animation
-
-        #vdf_anim_2D = Animation()
-        #for i in 1:num_timesteps+1
-        #    p = histogram2d(vx_cache[:, i], vy_cache[:, i], xlabel = "vx", ylabel = "vy")
-        #    push!(p, vdf_anim_2D)
-        #end
-        
-        #@show vx_cache[:, 1]
-        #@show vy_cache[:, 1]
-        #histogram2d(vx_cache[:, 1], vy_cache[:, 1])
-
-        #g = gif(anim, "anim_2D_vdf_$(suffix).mp4")
-        # vdf x-|v| animation
-        # Density and electric field
 
         return t, grid.x, x_cache, vx_cache, vy_cache, δρ_cache, E_cache
     end
 
     t, x, xs, vxs, vys, ρs, Es = hybrid_wave(B0 = √(3), perturb = :vx, suffix="hybrid_perturb_vx")
-    #t, x, xs, vxs, vys, ρs, Es = hybrid_wave(B0 = √(3), perturb = :x, suffix="hybrid_perturb_x")
-    #t, x, xs, vxs, vys, ρs, Es = hybrid_wave(B0 = √(3), perturb = :vy, suffix="hybrid_perturb_vy")
+    t, x, xs, vxs, vys, ρs, Es = hybrid_wave(B0 = √(3), perturb = :x, suffix="hybrid_perturb_x")
+    t, x, xs, vxs, vys, ρs, Es = hybrid_wave(B0 = √(3), perturb = :vy, suffix="hybrid_perturb_vy")
 end
 
 begin
@@ -246,14 +167,12 @@ begin
         N = 128
         N_ppc = 128
         N_p = N * N_ppc
-        xmax = π/5
-        tmax = 200.0
+        xmax = 2π/10
+        tmax = 100.0
         Δt = 0.2
         k = 10
         δn = 0.001
         v0 = 4.5 * B0 / k
-
-        num_timesteps = ceil(Int, tmax / Δt)
 
         particles, fields, grid = ParticleInCell.initialize(
             N_p, N_p, N, 0.0, xmax;
@@ -261,8 +180,8 @@ begin
 
         # Perturb particles
         for i = 1:N_p
-            δx = δn * sin(2π * k * particles.x[i] / xmax)
-            θᵢ = 71 * 2π * i / N_p
+            δx = δn * sin(k * particles.x[i]) / k
+            θᵢ = 73 * (2π * i / N_p)
             vx = v0 * cos(θᵢ)
             vy = v0 * sin(θᵢ)
 
@@ -271,43 +190,15 @@ begin
             particles.vy[i] = vy
         end
 
-        ParticleInCell.update!(particles, fields, particles, fields, grid, Δt, push_particles=false)
-
-        E_cache  = zeros(N, num_timesteps+1)
-        δρ_cache = zeros(N, num_timesteps+1)
-        vx_cache = zeros(N_p, num_timesteps+1)
-        vy_cache = zeros(N_p, num_timesteps+1)
-        x_cache  = zeros(N_p, num_timesteps+1)
-
-        E_cache[:, 1] = fields.Ex
-        δρ_cache[:, 1] = fields.ρ .- 1
-        x_cache[:, 1] = particles.x
-        vx_cache[:, 1] = particles.vx
-        vy_cache[:, 1] = particles.vy
-
-        fields.Bz .= B0
-        particles.Bz .= B0
-
-        for i in 2:num_timesteps+1
-            ParticleInCell.update!(particles, fields, grid, Δt)
-            E_cache[:, i] = copy(fields.Ex)
-            δρ_cache[:, i] = copy(fields.ρ) .- 1.0
-            vx_cache[:, i] = copy(particles.vx)
-            vy_cache[:, i] = copy(particles.vy)
-            x_cache[:, i] = copy(particles.x)
-        end
-
-        t = LinRange(0, tmax, num_timesteps+1)
-
-        return t, grid.x, x_cache, vx_cache, vy_cache, δρ_cache, E_cache
+        return ParticleInCell.simulate(particles, fields, grid; Δt, tmax, B0)
     end
 
     function plot_magnetized_ring(t, x, xs, vxs, vys, n, E; suffix = "" , animate = false)
         plot_size = (1660, 1080)
-        fx_initial = plot_vdf(xs[:, 1], vys[:, 1], type="1D", vlims = (-0.25, 0.25), t = t[1])
-        fx_final = plot_vdf(xs[:, end], vys[:, end], type="1D", vlims = (-0.25, 0.25), t = t[end])
-        fv_initial = plot_vdf(vxs[:, 1], vys[:, 1], type="2D", vlims = (-0.25, 0.25), t = t[1])
-        fv_final = plot_vdf(vxs[:, end], vys[:, end], type="2D", vlims = (-0.25, 0.25), t = t[end])
+        fx_initial = ParticleInCell.plot_vdf(xs[:, 1], vys[:, 1], type="1D", vlims = (-0.25, 0.25), t = t[1])
+        fx_final = ParticleInCell.plot_vdf(xs[:, end], vys[:, end], type="1D", vlims = (-0.25, 0.25), t = t[end])
+        fv_initial = ParticleInCell.plot_vdf(vxs[:, 1], vys[:, 1], type="2D", vlims = (-0.25, 0.25), t = t[1])
+        fv_final = ParticleInCell.plot_vdf(vxs[:, end], vys[:, end], type="2D", vlims = (-0.25, 0.25), t = t[end])
 
         savefig(fx_initial, "$(WS6_RESULTS_DIR)/vdf_initial_1D_$(suffix).png")
         savefig(fx_final, "$(WS6_RESULTS_DIR)/vdf_final_1D_$(suffix).png")
@@ -315,19 +206,19 @@ begin
         savefig(fv_final, "$(WS6_RESULTS_DIR)/vdf_final_2D_$(suffix).png")
 
         if animate
-            animate_vdf(xs, vys; suffix, frameskip=2, type="1D", vlims = (-0.25, 0.25), ts = t)
-            animate_vdf(vxs, vys; suffix, frameskip=2, type="2D", vlims = (-0.25, 0.25), ts = t)
+            ParticleInCell.animate_vdf(xs, vys; suffix, frameskip=2, type="1D", vlims = (-0.25, 0.25), ts = t)
+            ParticleInCell.animate_vdf(vxs, vys; suffix, frameskip=2, type="2D", vlims = (-0.25, 0.25), ts = t)
         end
 
         n_amplitude = zeros(length(t))
         E_amplitude = zeros(length(t))
         for i in 1:length(t)
-            n_amplitude[i] = max(abs.(extrema(n[:, i]))...)
-            E_amplitude[i] = max(abs.(extrema(E[:, i]))...)
+            n_amplitude[i] = maximum(n[:, i]) - 1.0
+            E_amplitude[i] = sqrt(sum(E[:, i].^2 ./ 2))
         end
 
         p_growth = plot(;
-            xlabel = "tωp", ylabel = "Perturbation amplitude (arb.)", yaxis = :log,
+            xlabel = "tωp", ylabel = "Amplitude (arb.)", yaxis = :log,
             size = (1080, 1080),
             titlefontsize=FONT_SIZE*3÷2,
             legendfontsize=FONT_SIZE,
@@ -338,33 +229,33 @@ begin
             framestyle=:box,
             legend = :bottomright,
             margin = 10Plots.mm,
-            ylims = (3e-6, 3e0)
         )
-
 
         plot!(t, n_amplitude, label = "n", lw = 2, lc = :red)
         plot!(t, E_amplitude, label = "E", lw = 2, lc = :blue)
 
-        if suffix == "ring_stable" || suffix == "ring_unstable"
+        if suffix == "ring_unstable"
 
             if suffix == "ring_stable"
                 γ_expected = 0.0
             elseif suffix == "ring_unstable"
                 γ_expected = 0.265 / √(10)
             end
-            E_ind = 580
-            n_ind = 677
-            expected_growth_n = @. n_amplitude[n_ind] * exp(γ_expected * (t - t[n_ind]))
-            expected_growth_E = @. E_amplitude[E_ind] * exp(γ_expected * (t - t[E_ind]))
+            #E_ind = 1
+            #n_ind = 1
+            expected_growth_n = @. 1e-3/sqrt(2) * exp(γ_expected * (t))
+            expected_growth_E = @. 1e-4/sqrt(2) * exp(γ_expected * (t))
             
             plot!(t, expected_growth_n, label = "Expected (n)", ls = :dash, lw = 2, lc = :red)
             plot!(t, expected_growth_E, label = "Expected (E)", ls = :dash, lw = 2, lc = :blue)
         end
+
+        savefig(p_growth, "$(WS6_RESULTS_DIR)/growth_$(suffix).png")
         
         display(p_growth)
 
         contour_E = heatmap(t, x, E; xlabel = "tωₚ", ylabel = "xωₚ/c", c=:balance, linewidth=0, title = "eE / mcωₚ", size=plot_size, margin=20Plots.mm, PLOT_SCALING_OPTIONS...)        
-        contour_ρ = heatmap(t, x, n; xlabel = "tωₚ", ylabel = "xωₚ/c", c=:plasma, linewidth=0, title = "δn / n₀", size=plot_size, margin=20Plots.mm, PLOT_SCALING_OPTIONS...)
+        contour_ρ = heatmap(t, x, n .- 1.0; xlabel = "tωₚ", ylabel = "xωₚ/c", c=:plasma, linewidth=0, title = "δn / n₀", size=plot_size, margin=20Plots.mm, PLOT_SCALING_OPTIONS...)
 
         savefig(contour_E, "$(WS6_RESULTS_DIR)/E_$(suffix).png")
         savefig(contour_ρ, "$(WS6_RESULTS_DIR)/n_$(suffix).png")

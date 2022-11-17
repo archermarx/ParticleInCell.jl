@@ -2,7 +2,21 @@ module ParticleInCell
 
 using FFTW: fft!, ifft!, ifft!, fftfreq
 using Statistics
-using Plots: plot, plot!, heatmap
+using Plots
+using Printf
+
+const WS6_RESULTS_DIR = mkpath("results/worksheet_6")
+const VERTICAL_RES = 1080
+const FONT_SIZE = round(Int, VERTICAL_RES/600 * 12)
+const PLOT_SCALING_OPTIONS = (;
+            titlefontsize=FONT_SIZE*3÷2,
+            legendfontsize=FONT_SIZE÷1.2,
+            xtickfontsize=FONT_SIZE,
+            ytickfontsize=FONT_SIZE,
+            xguidefontsize=FONT_SIZE,
+            yguidefontsize=FONT_SIZE,
+            framestyle=:box,
+)
 
 struct Grid
     x::AbstractVector{Float64}
@@ -120,9 +134,11 @@ struct Fields
     ϕ̃::Vector{Complex{Float64}}
     Ẽx::Vector{Complex{Float64}}
     Ẽy::Vector{Complex{Float64}}
+    # Scaling quantities
+    charge_per_particle::Int
 end
 
-function Fields(num_gridpts::Int)
+function Fields(num_gridpts::Int; charge_per_particle = 1)
     ρ = zeros(num_gridpts)
     jx = zeros(num_gridpts)
     jy = zeros(num_gridpts)
@@ -137,7 +153,7 @@ function Fields(num_gridpts::Int)
     Ẽx = zeros(Complex{Float64}, num_gridpts)
     Ẽy = zeros(Complex{Float64}, num_gridpts)
 
-    return Fields(ρ, jx, jy, Ex, Ey, ϕ, Bz, ρ̃, ϕ̃, Ẽx, Ẽy)
+    return Fields(ρ, jx, jy, Ex, Ey, ϕ, Bz, ρ̃, ϕ̃, Ẽx, Ẽy, charge_per_particle)
 end
 
 
@@ -202,9 +218,9 @@ function interpolate_charge_to_grid!(particles::Particles, field::Fields, grid::
 
     (; num_gridpts, Δx, xmin) = grid
     (; num_particles, x, vx, vy) = particles
-    (; ρ, jx, jy) = field
+    (; ρ, jx, jy, charge_per_particle) = field
 
-    W = num_gridpts / num_particles
+    W = charge_per_particle * num_gridpts / num_particles
 
     # zero charge and current densities
     for j in 1:num_gridpts
@@ -259,11 +275,11 @@ end
 Initialize simulation, aka allocate arrays for grid, particles, and fields
 Then distribute particles and compute the initial fields
 """
-function initialize(num_particles, max_particles, num_gridpts, xmin, xmax; perturbation_amplitude = 0.0, perturbation_wavenumber = 2π, perturbation_speed = 0.0)
+function initialize(num_particles, max_particles, num_gridpts, xmin, xmax; perturbation_amplitude = 0.0, perturbation_wavenumber = 2π, perturbation_speed = 0.0, charge_per_particle = 1)
 
     grid = Grid(;num_gridpts, xmin, xmax)
     particles = Particles(num_particles, max_particles, grid)
-    fields = Fields(num_gridpts)
+    fields = Fields(num_gridpts; charge_per_particle)
 
     # Perturb particle positions
     perturb!(particles, perturbation_amplitude, perturbation_wavenumber, perturbation_speed, grid.L)
@@ -343,5 +359,111 @@ end
 function update!(particles::Particles, fields::Fields, grid::Grid, Δt; push_particles = true)
     update!(particles, fields, particles, fields, grid, Δt; push_particles)
 end
+
+function simulate(particles, fields, grid; Δt, tmax, B0 = 0.0)
+
+    N = length(fields.ρ)
+    N_p = particles.num_particles
+
+    # Compute number of timesteps
+    num_timesteps = ceil(Int, tmax / Δt)
+    t = LinRange(0, tmax, num_timesteps+1)
+
+    # Initialize fields and charge densities
+    update!(particles, fields, particles, fields, grid, Δt, push_particles=false)
+
+    # Initialize caches for variables
+    E_cache  = zeros(N, num_timesteps+1)
+    n_cache = zeros(N, num_timesteps+1)
+    vx_cache = zeros(N_p, num_timesteps+1)
+    vy_cache = zeros(N_p, num_timesteps+1)
+    x_cache  = zeros(N_p, num_timesteps+1)
+
+    E_cache[:, 1] .= fields.Ex
+    n_cache[:, 1] .= fields.ρ
+    x_cache[:, 1] .= particles.x
+    vx_cache[:, 1] .= particles.vx
+    vy_cache[:, 1] .= particles.vy
+
+    # Assign magnetic field to fields and particles
+    fields.Bz .= B0
+    particles.Bz .= B0
+
+    # Simulate
+    for i in 2:num_timesteps+1
+        # Push to next timestep
+        ParticleInCell.update!(particles, fields, grid, Δt)
+        # Save quantities
+        x_cache[:, i] .= particles.x
+        vx_cache[:, i] .= particles.vx
+        vy_cache[:, i] .= particles.vy
+        n_cache[:, i] .= fields.ρ
+        E_cache[:, i] .= fields.Ex
+    end
+
+    return t, grid.x, x_cache, vx_cache, vy_cache, n_cache, E_cache
+end
+
+# Postprocessing functions
+
+function plot_vdf(vx, vy; type="1D", vlims, t = nothing)
+
+    pad_amount = 0.1
+    
+    ylims = vlims
+
+    if isnothing(t)
+        t_str = ""
+    else
+        t_str = @sprintf(", tωₚ = %.1f", t)
+    end
+
+    if type == "1D"
+        title = "f(x, v)" * t_str
+        xlabel = "x"
+        ylabel = "v"
+        xmin, xmax = extrema(vx)
+        pad = pad_amount * (xmax - xmin)
+        xlims = (xmin - pad, xmax+pad)
+        aspect_ratio = :auto
+    elseif type == "2D"
+        title = "f(vx, vy)" * t_str
+        xlabel = "vx"
+        ylabel = "vy"
+        xlims = ylims
+        aspect_ratio = 1
+    end
+
+    p = plot(;
+        size = (1080, 1080),
+        titlefontsize=FONT_SIZE*3÷2,
+        legendfontsize=FONT_SIZE÷1.5,
+        xtickfontsize=FONT_SIZE,
+        ytickfontsize=FONT_SIZE,
+        xguidefontsize=FONT_SIZE,
+        yguidefontsize=FONT_SIZE,
+        framestyle=:box,
+    )
+    scatter!(p, 
+        vx, vy; 
+        xlims, ylims, 
+        msw = 0, mc = :black, ms = 1.0, 
+        title, xlabel, ylabel,
+        label = "",
+        aspect_ratio
+    )
+
+    return p
+end
+
+function animate_vdf(vx, vy; ts, dir = "", suffix = "", frameskip=0, type = "1D", kwargs...)
+    anim = Animation()
+    for i in 1:(1+frameskip):size(vx, 2)
+        p = plot_vdf(vx[:, i], vy[:, i]; t = ts[i], type, kwargs...)
+        frame(anim)
+    end
+    gif(anim, joinpath(dir, "anim_vdf_$(type)_$(suffix).mp4"))
+end
+
 
 end # module ParticleInCell

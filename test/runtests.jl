@@ -157,23 +157,23 @@ end
 
 # TODO: add tests for when number of particles is less than the number of cells
 @testset "Charge and current density initialization" begin
-    xmin, xmax = 0.0, 1.0
-    num_gridpts = 100
+        xmin, xmax = 0.0, 1.0
+        num_gridpts = 100
 
-    for particles_per_cell in 1.0:0.2:10
-        num_particles = round(Int, particles_per_cell*num_gridpts)
-        max_particles = 2*num_particles
+        for particles_per_cell in 1.0:0.2:10
+            num_particles = round(Int, particles_per_cell*num_gridpts)
+            max_particles = 2*num_particles
 
-        # Initialize particles, grid, fields
-        particles, fields, grid = ParticleInCell.initialize(num_particles, max_particles, num_gridpts, xmin, xmax)
+            # Initialize particles, grid, fields
+            particles, fields, grid = ParticleInCell.initialize(num_particles, max_particles, num_gridpts, xmin, xmax)
 
-        # check that charge density is equal to 1 when particles are uniformly initialized
-        @test all(isapprox.(fields.ρ, 1.0, rtol = 1/particles_per_cell^2))
+            # check that charge density is equal to 1 when particles are uniformly initialized
+            @test all(isapprox.(fields.ρ, 1.0, rtol = 1/particles_per_cell^2))
 
-        # check that current denstiy is zero
-        @test all(isapprox.(fields.jx, 0.0, rtol = 1/particles_per_cell^2))
-        @test all(isapprox.(fields.jy, 0.0, rtol = 1/particles_per_cell^2))
-    end
+            # check that current denstiy is zero
+            @test all(isapprox.(fields.jx, 0.0, rtol = 1/particles_per_cell^2))
+            @test all(isapprox.(fields.jy, 0.0, rtol = 1/particles_per_cell^2))
+        end
 end
 
 # If particles are initialized uniformly, they shouldn't move at all.
@@ -414,13 +414,35 @@ end
 
     for i in 2:num_timesteps+1
         ParticleInCell.update!(particles, fields, grid, Δt)
-        E_cache[:, i] = copy(fields.Ex)
-        ρ_cache[:, i] = copy(fields.ρ)
-        x_cache[:, i] = copy(particles.x)
-        vx_cache[:, i] = copy(particles.vx)
+        E_cache[:, i] .= fields.Ex
+        ρ_cache[:, i] .= fields.ρ
+        x_cache[:, i] .= particles.x
+        vx_cache[:, i] .= particles.vx
     end
 
     @test allapprox(E_cache[:, end], E_cache[:, 1])
     @test allapprox(ρ_cache[:, end], ρ_cache[:, 1])
     @test allapprox(vx_cache[:, end], vx_cache[:, 1])
+end
+
+@testset "Particle charge scaling" begin
+    # Test charged particle scaling
+    xmin, xmax = 0.0, 1.0
+    num_gridpts = 100
+
+    for particles_per_cell in 1.0:0.2:10
+        num_particles = round(Int, particles_per_cell*num_gridpts)
+        max_particles = 2*num_particles
+
+        # Initialize particles, grid, fields
+        particles, fields, grid = ParticleInCell.initialize(num_particles, max_particles, num_gridpts, xmin, xmax, charge_per_particle=2)
+
+        # check that charge density is equal to 1 when particles are uniformly initialized
+        @test all(isapprox.(fields.ρ, 2.0, rtol = 1/particles_per_cell^2))
+
+        # check that current denstiy is zero
+        @test all(isapprox.(fields.jx, 0.0, rtol = 1/particles_per_cell^2))
+        @test all(isapprox.(fields.jy, 0.0, rtol = 1/particles_per_cell^2))
+    end
+    
 end
