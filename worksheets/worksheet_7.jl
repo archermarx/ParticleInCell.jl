@@ -1,20 +1,22 @@
-using Revise
-using ParticleInCell
-using Plots
-using Printf
+begin
+    using Revise
+    using ParticleInCell
+    using Plots
+    using Printf
 
-const WS7_RESULTS_DIR = mkpath("results/worksheet_7")
-const VERTICAL_RES = 1080
-const FONT_SIZE = round(Int, VERTICAL_RES/600 * 12)
-const PLOT_SCALING_OPTIONS = (;
-            titlefontsize=FONT_SIZE*3÷2,
-            legendfontsize=FONT_SIZE÷1.2,
-            xtickfontsize=FONT_SIZE,
-            ytickfontsize=FONT_SIZE,
-            xguidefontsize=FONT_SIZE,
-            yguidefontsize=FONT_SIZE,
-            framestyle=:box,
-)
+    const WS7_RESULTS_DIR = mkpath("results/worksheet_7")
+    const VERTICAL_RES = 1080
+    const FONT_SIZE = round(Int, VERTICAL_RES/600 * 12)
+    const PLOT_SCALING_OPTIONS = (;
+                titlefontsize=FONT_SIZE*3÷2,
+                legendfontsize=FONT_SIZE÷1.2,
+                xtickfontsize=FONT_SIZE,
+                ytickfontsize=FONT_SIZE,
+                xguidefontsize=FONT_SIZE,
+                yguidefontsize=FONT_SIZE,
+                framestyle=:box,
+    )
+end
 
 begin
     # Problem 1: Two-stream instability
@@ -66,7 +68,7 @@ begin
         v_d = 3.0
         n_b_ratio = 10
         xmin = 0.0
-        xmax = π
+        xmax = 1.0
         tmin = 0.0
         tmax = 30π
         Δt = 0.2

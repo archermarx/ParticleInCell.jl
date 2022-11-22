@@ -3,18 +3,20 @@ using Plots
 using Printf
 using Revise
 
-const WS6_RESULTS_DIR = mkpath("results/worksheet_6")
-const VERTICAL_RES = 1080
-const FONT_SIZE = round(Int, VERTICAL_RES/600 * 12)
-const PLOT_SCALING_OPTIONS = (;
-            titlefontsize=FONT_SIZE*3÷2,
-            legendfontsize=FONT_SIZE÷1.2,
-            xtickfontsize=FONT_SIZE,
-            ytickfontsize=FONT_SIZE,
-            xguidefontsize=FONT_SIZE,
-            yguidefontsize=FONT_SIZE,
-            framestyle=:box,
-)
+begin
+    const WS6_RESULTS_DIR = mkpath("results/worksheet_6")
+    const VERTICAL_RES = 1080
+    const FONT_SIZE = round(Int, VERTICAL_RES/600 * 12)
+    const PLOT_SCALING_OPTIONS = (;
+                titlefontsize=FONT_SIZE*3÷2,
+                legendfontsize=FONT_SIZE÷1.2,
+                xtickfontsize=FONT_SIZE,
+                ytickfontsize=FONT_SIZE,
+                xguidefontsize=FONT_SIZE,
+                yguidefontsize=FONT_SIZE,
+                framestyle=:box,
+    )
+end
 
 begin
     # Problem 1: Gyro orbit preservation
@@ -57,8 +59,9 @@ begin
     vys = [p.vy[1] for p in particle_cache]
     ts = LinRange(0, tmax, num_timesteps+1)
 
-    vx_analytic = cos.(0:0.1:3π)
-    vy_analytic = sin.(0:0.1:3π)
+    ts_analytic = 0:0.1:tmax
+    vx_analytic = cos.(ts_analytic)
+    vy_analytic = sin.(ts_analytic)
 
     p = plot(;
         size = (1080, 1080),
@@ -77,6 +80,34 @@ begin
     display(p)
 
     savefig(p, joinpath(WS6_RESULTS_DIR, "problem1.png"))
+
+    px = plot(;
+        titlefontsize=FONT_SIZE*3÷2,
+        legendfontsize=FONT_SIZE÷1.5,
+        xtickfontsize=FONT_SIZE,
+        ytickfontsize=FONT_SIZE,
+        xguidefontsize=FONT_SIZE,
+        yguidefontsize=FONT_SIZE,
+        framestyle=:box,
+    )
+    plot!(px, ts_analytic, vy_analytic, label = "Analytic", lw = 4, xlabel = "tωₚ", ylabel = "vx/c")
+    scatter!(px, ts, vxs, label = "Computed", mc = :red, ms = 6, msw = 0, title = "x velocity")
+
+    py = plot(;
+        titlefontsize=FONT_SIZE*3÷2,
+        legendfontsize=FONT_SIZE÷1.5,
+        xtickfontsize=FONT_SIZE,
+        ytickfontsize=FONT_SIZE,
+        xguidefontsize=FONT_SIZE,
+        yguidefontsize=FONT_SIZE,
+        framestyle=:box,
+    )
+    plot!(py, ts_analytic, vx_analytic, label = "", lw = 4, xlabel = "tωₚ", ylabel = "vy/c")
+    scatter!(py, ts, vys, label = "", mc = :red, msw = 0, ms = 6,title = "y velocity")
+
+    p2 = plot(px, py, layout = (2, 1), size = (1980, 1060), margin = 10Plots.mm)
+    display(p2)
+    savefig(p2, joinpath(WS6_RESULTS_DIR, "problem1_time.png"))
 end
 
 
@@ -159,6 +190,12 @@ begin
     t, x, xs, vxs, vys, ρs, Es = hybrid_wave(B0 = √(3), perturb = :vx, suffix="hybrid_perturb_vx")
     t, x, xs, vxs, vys, ρs, Es = hybrid_wave(B0 = √(3), perturb = :x, suffix="hybrid_perturb_x")
     t, x, xs, vxs, vys, ρs, Es = hybrid_wave(B0 = √(3), perturb = :vy, suffix="hybrid_perturb_vy")
+
+    particle_id = 1
+    px = plot(t[2:end], vxs[particle_id, 2:end], label = "", xlabel = "tωp", ylabel = "vx/c", title = "x-velocity")
+    py = plot(t[2:end], vys[particle_id, 2:end], label = "", xlabel = "tωp", ylabel = "vy/c", title = "y-velocity")
+    p = plot(px, py, layout = (2, 1))
+    savefig(p, joinpath(WS6_RESULTS_DIR, "hybrid_single.png"))
 end
 
 begin
