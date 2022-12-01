@@ -406,14 +406,16 @@ end
 
 # Postprocessing functions
 
-function plot_vdf(vx, vy; type="1D", vlims, t = nothing)
+function plot_vdf(vx, vy; type="1D", vlims, t = nothing, style = :scatter, bins = nothing)
 
-    pad_amount = 0.1
+    pad_amount = 0.0
     
     ylims = vlims
 
     if isnothing(t)
         t_str = ""
+    elseif t isa String
+        t_str = ", tωₚ = $(t)"
     else
         t_str = @sprintf(", tωₚ = %.1f", t)
     end
@@ -444,14 +446,30 @@ function plot_vdf(vx, vy; type="1D", vlims, t = nothing)
         yguidefontsize=FONT_SIZE,
         framestyle=:box,
     )
-    scatter!(p, 
-        vx, vy; 
-        xlims, ylims, 
-        msw = 0, mc = :black, ms = 1.0, 
-        title, xlabel, ylabel,
-        label = "",
-        aspect_ratio
-    )
+
+    nbins = isnothing(bins) ? 100 : bins
+    xbins = LinRange(xlims[1], xlims[2], nbins)
+    ybins = LinRange(ylims[1], ylims[2], nbins)
+
+    if style == :histogram
+        histogram2d!(p, 
+            vx, vy; 
+            xlims, ylims, 
+            bins = (xbins, ybins),
+            aspect_ratio, 
+            title, xlabel, ylabel,
+            show_empty_bins = true,
+        )
+    elseif style == :scatter
+        scatter!(p, 
+            vx, vy; 
+            xlims, ylims, 
+            msw = 0, mc = :black, ms = 1.0, 
+            title, xlabel, ylabel,
+            label = "",
+            aspect_ratio
+        )
+    end
 
     return p
 end
