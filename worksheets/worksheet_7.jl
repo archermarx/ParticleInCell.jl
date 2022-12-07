@@ -181,16 +181,15 @@ begin
         return ParticleInCell.simulate(particles, fields, grid; Δt, tmax)
     end
 
-    N = 128
-    N_ppc = 128
+    N = 512
+    N_ppc = 512
     Np = N * N_ppc
     tmax = 15
 
     v_th = 0.01
     v_d = 3.0
-    ratio = 10
 
-    ratios = 2:2:32
+    ratios = [10]#2:2:32
     growthrates = zeros(length(ratios))
     initial_amplitudes = zeros(length(ratios))
 
@@ -208,6 +207,24 @@ begin
             plot!(p, t[5:end], Δvs[5:end], label = "Ratio = $ratio", lw = 4)
         end
 
+        if ratio == 10
+            frames = [0, 3, 6, 9, 12, 15]
+            for f in frames
+                ind = findfirst(>=(f*π), t)
+                x = xs[:, ind]
+                v = vxs[:, ind]
+
+                q = ParticleInCell.plot_vdf(
+                    x, v; type = "1D",
+                    vlims, t = "$(f)π, N = $(N), Nppc = $(N_ppc)",
+                    style = :histogram, bins = 200, normalize=true,
+                    c = :viridis, clims = (0, 0.15),
+                    colorbar = false
+                )
+                savefig(q, "$(WS7_RESULTS_DIR)/beam_plasma_$(f)pi.png")
+            end
+        end
+
         max_n = mapslices(maximum, abs.(ns), dims=1)'
         max_E = mapslices(maximum, abs.(Es), dims=1)'
 
@@ -220,7 +237,7 @@ begin
         growthrates[i] = fit.param[1]
         initial_amplitudes[i] = fit.param[2]
     end
-    savefig(p, "$(WS7_RESULTS_DIR)/beam_thermalization.png")
+    #savefig(p, "$(WS7_RESULTS_DIR)/beam_thermalization.png")
     display(p)
 end
 

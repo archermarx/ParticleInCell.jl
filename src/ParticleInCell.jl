@@ -406,7 +406,7 @@ end
 
 # Postprocessing functions
 
-function plot_vdf(vx, vy; type="1D", vlims, t = nothing, style = :scatter, bins = nothing)
+function plot_vdf(vx, vy; type="1D", vlims, t = nothing, style = :scatter, bins = nothing, kwargs...)
 
     pad_amount = 0.0
     
@@ -459,6 +459,7 @@ function plot_vdf(vx, vy; type="1D", vlims, t = nothing, style = :scatter, bins 
             aspect_ratio, 
             title, xlabel, ylabel,
             show_empty_bins = true,
+            kwargs...
         )
     elseif style == :scatter
         scatter!(p, 
@@ -467,7 +468,8 @@ function plot_vdf(vx, vy; type="1D", vlims, t = nothing, style = :scatter, bins 
             msw = 0, mc = :black, ms = 1.0, 
             title, xlabel, ylabel,
             label = "",
-            aspect_ratio
+            aspect_ratio,
+            kwargs...
         )
     end
 
