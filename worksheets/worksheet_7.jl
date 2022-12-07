@@ -259,10 +259,11 @@ begin
     amplitude = 0.05
     xmax = 2 * 2π/wavenumber
     tmax = 10 * π
+    v_th = 0.04
 
-    N = 1024
-    N_ppc = 2048
-    @time t, x, xs, vxs, vys, ns, Es = landau_damping(N, N_ppc; wavenumber, wave_speed, amplitude, xmax, tmax)
+    N = 2048
+    N_ppc = 4096
+    @time t, x, xs, vxs, vys, ns, Es = landau_damping(N, N_ppc; wavenumber, v_th, wave_speed, amplitude, xmax, tmax)
 end
 
 begin
@@ -278,15 +279,37 @@ begin
     savefig(hm_n, "$(WS7_RESULTS_DIR)/landau_n")
     savefig(hm_E, "$(WS7_RESULTS_DIR)/landau_E")
 end
+
+using KernelDensity
+
 begin
-    vdf_options = (;label = "", normalize = true, lw = 4, xlims = (-0.15, 0.2), size = plot_size, margin, xlabel = "v/c", ylabel = "f(v)", PLOT_SCALING_OPTIONS..., ylims = (0, 10))
-    p1 = histogram(vxs[:, 1];  vdf_options...)
+    vdf_options = (;label = "", normalize = true, lw = 6, xlims = (-0.15, 0.2), size = plot_size, margin, xlabel = "v/c", ylabel = "f(v)", PLOT_SCALING_OPTIONS..., ylims = (0, 10))
+    den1 = kde(vxs[:, 1])
+    den2 = kde(vxs[:, end])
+    
+    p1 = plot(den1.x, den1.density; vdf_options...)
     vline!(p1, [wave_speed], label = "ω/k", lw = 4, lc = :red, ls = :dash)
     display(p1)
     
-    p2 = histogram(vxs[:, end]; vdf_options...)
+    p2 = plot(den2.x, den2.density; vdf_options...)
     vline!(p2, [wave_speed], label = "ω/k", lw = 4, lc = :red, ls = :dash)
     display(p2)
-    savefig(p1, "$(WS7_RESULTS_DIR)/landau_vdf_before")
-    savefig(p2, "$(WS7_RESULTS_DIR)/landau_vdf_after")
+    savefig(p1, "$(WS7_RESULTS_DIR)/landau_vdf_before.png")
+    savefig(p2, "$(WS7_RESULTS_DIR)/landau_vdf_after.png")
+end
+
+begin
+    kλd = wavenumber * v_th
+    expected_damping_rate = -sqrt(π/8) / kλd^3 * exp(-0.5 / kλd^2)
+    max_E = mapslices(maximum, Es.^2, dims=1)'
+    Nt = length(t)
+
+    eqn = @. (x, p) -> p[1] * exp(expected_damping_rate*x)
+    fit_landau = curve_fit(eqn, t[1:Nt÷3], max_E[1:Nt÷3], [1e-5])
+
+    p = plot(;margin = 10Plots.mm, size = (1080, 1080), xlims = extrema(t), PLOT_SCALING_OPTIONS..., xlabel = "tωp", ylabel = "E²/2", ylims = extrema(max_E))
+    plot!(p, t, max_E, yaxis = :log, lw = 4, label = "")
+    plot!(p, t, eqn(t, fit_landau.param), lw = 4, lc = :red, ls = :dash, yaxis = :log, label = "Linear damping rate")
+    display(p)
+    savefig(p, "$(WS7_RESULTS_DIR)/damping_landau.png")
 end
