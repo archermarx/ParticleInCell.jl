@@ -182,48 +182,55 @@ begin
     end
 
     N = 128
-    N_ppc = 64
+    N_ppc = 128
+    Np = N * N_ppc
     tmax = 15
 
     v_th = 0.01
     v_d = 3.0
     ratio = 10
 
-    ratios = 2:2:30
-    num_trials = 1
-    growthrates = zeros(length(ratios), num_trials)
-    initial_amplitudes = zeros(length(ratios), num_trials)
+    ratios = 2:2:32
+    growthrates = zeros(length(ratios))
+    initial_amplitudes = zeros(length(ratios))
 
-    for trial in 1:num_trials
-        println("trial $trial")
-        for (i, ratio) in enumerate(ratios)
-            t, x, xs, vxs, vys, ns, Es = bump_on_tail(N, N_ppc; v_th, v_d, tmax, ratio)
-            vlims = (-0.5, 3.5)
+    p = plot(; legend = :topleft, yaxis = :log, size = (1080, 1080), xlabel = "tωp", ylabel = "Δv", PLOT_SCALING_OPTIONS...)
+    for (i, ratio) in enumerate(ratios)
+        t, x, xs, vxs, vys, ns, Es = bump_on_tail(N, N_ppc; v_th, v_d, tmax, ratio)
+        vlims = (-0.5, 3.5)
 
-            max_n = mapslices(maximum, abs.(ns), dims=1)'
-            max_E = mapslices(maximum, abs.(Es), dims=1)'
+        if ratio ∈ [2, 4, 8, 16, 32]
+            Δvs = [
+                std(vxs[1:ratio:Np, j])
+                for j in eachindex(t)
+            ]
 
-            i1 = findlast(<(5π), t)
-            i2 = findfirst(>(8π), t)
-            t_linear = t[i1:i2]
-            E_linear = max_E[i1:i2]
-            @. exponential(x, p) = p[2] * exp(p[1] * x)
-            fit = curve_fit(exponential, t_linear, E_linear, [0.25, 0.01])
-            growthrates[i, trial] = fit.param[1]
-            initial_amplitudes[i, trial] = fit.param[2]
+            plot!(p, t[5:end], Δvs[5:end], label = "Ratio = $ratio", lw = 4)
         end
+
+        max_n = mapslices(maximum, abs.(ns), dims=1)'
+        max_E = mapslices(maximum, abs.(Es), dims=1)'
+
+        i1 = findlast(<(5π), t)
+        i2 = findfirst(>(8π), t)
+        t_linear = t[i1:i2]
+        E_linear = max_E[i1:i2]
+        @. exponential(x, p) = p[2] * exp(p[1] * x)
+        fit = curve_fit(exponential, t_linear, E_linear, [0.25, 0.01])
+        growthrates[i] = fit.param[1]
+        initial_amplitudes[i] = fit.param[2]
     end
+    savefig(p, "$(WS7_RESULTS_DIR)/beam_thermalization.png")
+    display(p)
 end
 
 begin
     @. line(x, p) = p[1] + p[2] * x^(1/3)
-
-    mean_growth = mean(growthrates, dims=2)[:, 1]
-    fit = curve_fit(line, ratios, mean_growth, [0.3, -0.01])
+    fit = curve_fit(line, ratios, growthrates, [0.3, -0.01])
 
     @show fit.param
     p = plot(;xlabel = "Plasma to beam ratio", ylabel = "Linear growth rate", size = (900, 900), PLOT_SCALING_OPTIONS...)
-    scatter!(p, ratios, growthrates, label = "", ms = 6, ma = sqrt(1/num_trials), mc = :black)
+    scatter!(p, ratios, growthrates, label = "", ms = 6, mc = :black)
     plot!(p, ratios, line(ratios, fit.param); lw = 4, lc = :red, ls = :dash, label = "")
 
     savefig(p, joinpath(WS7_RESULTS_DIR, "beam_plasma_growth_vs_ratio.png"))
@@ -261,8 +268,8 @@ begin
     tmax = 10 * π
     v_th = 0.04
 
-    N = 2048
-    N_ppc = 4096
+    N = 512
+    N_ppc = 1024
     @time t, x, xs, vxs, vys, ns, Es = landau_damping(N, N_ppc; wavenumber, v_th, wave_speed, amplitude, xmax, tmax)
 end
 
