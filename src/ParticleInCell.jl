@@ -1,9 +1,11 @@
 module ParticleInCell
 
-using FFTW: fft!, ifft!, ifft!, fftfreq
+using FFTW: fft, fft!, ifft, ifft!, fftfreq, fftshift
 using Statistics
 using Plots
 using Printf
+using QuasiMonteCarlo
+using Distributions: quantile, Normal, pdf
 
 const WS6_RESULTS_DIR = mkpath("results/worksheet_6")
 const VERTICAL_RES = 1080
@@ -20,10 +22,10 @@ const PLOT_SCALING_OPTIONS = (;
 
 struct Grid
     x::AbstractVector{Float64}
-    xmin::Float64
-    xmax::Float64
     Δx::Float64
-    L::Float64
+    Lx::Float64
+    Ly::Float64
+    Lz::Float64
     num_gridpts::Int
     # Grid in frequency domain
     k::Vector{Float64}
@@ -31,14 +33,12 @@ struct Grid
     κ::Vector{Float64}
 end
 
-function Grid(; xmin, xmax, num_gridpts)
+function Grid(; Lx, Ly, Lz, num_gridpts)
 
-    x_aux = LinRange(xmin, xmax, num_gridpts+1)
+    # Compute x coordinates
+    x_aux = LinRange(0.0, Lx, num_gridpts+1)
     xs = [0.5 * (x_aux[i] + x_aux[i+1]) for i in 1:num_gridpts]
     Δx = xs[2] - xs[1]
-
-    # Compute domain length
-    L = xmax - xmin
 
     # Compute grid in frequency domain
     k = 2π * fftfreq(num_gridpts) / Δx
@@ -49,48 +49,57 @@ function Grid(; xmin, xmax, num_gridpts)
         κ[j] = k[j] * sinc(k[j] * Δx / π)
     end
 
-    return Grid(xs, xmin, xmax, Δx, L, num_gridpts, k, K, κ)
+    return Grid(xs, Δx, Lx, Ly, Lz, num_gridpts, k, K, κ)
 end
 
 struct Particles
+    # Positions
     x::Vector{Float64}
+    y::Vector{Float64}
+    z::Vector{Float64}
+    # Velocities
     vx::Vector{Float64}
     vy::Vector{Float64}
+    vz::Vector{Float64}
+    # Fields
     Ex::Vector{Float64}
     Ey::Vector{Float64}
     Bz::Vector{Float64}
+    # Other
+    weights::Vector{Float64}
     num_particles::Int
 end
 
-function Particles(num_particles::Int, max_particles::Int, grid::Grid)
+function Particles(num_particles::Int, grid::Grid)
     # Initialize arrays to allow for a perscribed maximum number of particles, in case
     # new particles are created later in the simulation.
 
     # Initialize particle positions uniformly throughout the domain
-    x = distribute_particles(num_particles, max_particles, grid)
+    x = distribute_particles(num_particles, grid)
+    y = rand(num_particles) .* grid.Ly
+    z = rand(num_particles) .* grid.Lz
 
     # Initial velocities and forces are zero
-    vx = fill(NaN, max_particles)
-    vy = fill(NaN, max_particles)
-    Ex = fill(NaN, max_particles)
-    Ey = fill(NaN, max_particles)
-    Bz = fill(NaN, max_particles)
+    vx = zeros(num_particles)
+    vy = zeros(num_particles)
+    vz = zeros(num_particles)
+    Ex = zeros(num_particles)
+    Ey = zeros(num_particles)
+    Bz = zeros(num_particles)
 
-    vx[1:num_particles] .= 0.0
-    vy[1:num_particles] .= 0.0
-    Ex[1:num_particles] .= 0.0
-    Ey[1:num_particles] .= 0.0
-    Bz[1:num_particles] .= 0.0
-
-    return Particles(x, vx, vy, Ex, Ey, Bz, num_particles)
+    # Particle weights
+    N_ppc = num_particles / grid.num_gridpts
+    weight = 1 / N_ppc
+    weights = fill(weight, num_particles)
+    return Particles(x, y, z, vx, vy, vz, Ex, Ey, Bz, weights, num_particles)
 end
 
-function distribute_particles(num_particles, max_particles, grid)
-    x = fill(NaN, max_particles)
+function distribute_particles(num_particles, grid)
+    x = zeros(num_particles)
 
-    (;xmin, xmax) = grid
+    (; Lx) = grid
 
-    x_aux = LinRange(xmin, xmax, num_particles+1)
+    x_aux = LinRange(0, Lx, num_particles+1)
     for i in 1:num_particles
         x[i] = 0.5*(x_aux[i]+x_aux[i+1])
     end
@@ -113,11 +122,38 @@ function perturb!(particles, amplitude, wavenumber, wavespeed, L)
     return nothing
 end
 
-function maxwellian_vdf!(particles, thermal_velocity)
-    for i in eachindex(particles.vx)
-        isnan(particles.vx[i]) && continue # no particle at this index
-        particles.vx[i] = randn() * thermal_velocity
+
+# This generates low-discrepancy samples from a normal distribution
+function sample_normal_quiet(D, N, R = QuasiMonteCarlo.NoRand())
+    # First sample from uniform distribution
+    us = QuasiMonteCarlo.sample(N, zeros(D), ones(D), SobolSample(; R))
+
+    # Then, use the inverse normal CDF to transform these samples
+    # to samples from a Normal distribution
+    xs = quantile.(Normal(), us)
+
+    return xs
+end
+
+function sample_maxwellian_quiet(D, N, v_thermal, R = QuasiMonteCarlo.NoRand())
+    vs = sample_normal_quiet(D, N, R)
+    vs .*= v_thermal
+    return vs
+end
+
+function maxwellian_vdf!(particles, thermal_velocity; quiet = false)
+    N = particles.num_particles
+
+    if quiet
+        velocities = sample_maxwellian_quiet(3, N, thermal_velocity, QuasiMonteCarlo.Shift())
+    else
+        velocities = randn(3, particles.num_particles) .* thermal_velocity
     end
+
+    @. @views particles.vx = velocities[1, :]
+    @. @views particles.vy = velocities[2, :]
+    @. @views particles.vz = velocities[3, :]
+   
     return nothing
 end
 
@@ -159,14 +195,18 @@ end
 
 function push_particles!(new_particles::Particles, particles::Particles, grid::Grid, Δt)
 
-    (;x, vx, vy, Ex, Ey, Bz, num_particles) = particles
-    (;xmin, xmax, L) = grid
+    (;x, y, z, vx, vy, vz, Ex, Ey, Bz, num_particles) = particles
+    (; Lx, Ly, Lz) = grid
 
     # Loop through all particles in simulation and push them to new positions and velocities
-    for i in 1:num_particles
+    Threads.@threads for i in 1:num_particles
 
         t = Bz[i] * Δt / 2
         s = 2 * t / (1 + t^2)
+
+        x_new = x[i] + 0.5 * vx[i] * Δt
+        y_new = y[i] + 0.5 * vy[i] * Δt
+        z_new = z[i] + 0.5 * vz[i] * Δt
 
         v_minus_x = vx[i] + 0.5 * Ex[i] * Δt
         v_minus_y = vy[i] + 0.5 * Ey[i] * Δt
@@ -179,17 +219,20 @@ function push_particles!(new_particles::Particles, particles::Particles, grid::G
 
         new_particles.vx[i] = v_plus_x + 0.5 * Ex[i] * Δt
         new_particles.vy[i] = v_plus_y + 0.5 * Ey[i] * Δt
+        new_particles.vz[i] = vz[i]
 
-        x_new = x[i] + new_particles.vx[i] * Δt
+        x_new = x_new + 0.5 * new_particles.vx[i] * Δt
+        y_new = y_new + 0.5 * new_particles.vy[i] * Δt
+        z_new = z_new + 0.5 * new_particles.vz[i] * Δt
 
         # Apply periodic boundary conditions for particles
-        if x_new > xmax
-            x_new -= L
-        elseif x_new < xmin
-            x_new += L
-        end
+        x_new = x_new - floor(x_new / Lx) * Lx
+        y_new = y_new - floor(y_new / Ly) * Ly
+        z_new = z_new - floor(z_new / Lz) * Lz
 
         new_particles.x[i] = x_new
+        new_particles.y[i] = y_new
+        new_particles.z[i] = z_new
     end
 
     return nothing
@@ -216,7 +259,7 @@ end
 
 function interpolate_charge_to_grid!(particles::Particles, field::Fields, grid::Grid)
 
-    (; num_gridpts, Δx, xmin) = grid
+    (; num_gridpts, Δx) = grid
     (; num_particles, x, vx, vy) = particles
     (; ρ, jx, jy, charge_per_particle) = field
 
@@ -232,7 +275,7 @@ function interpolate_charge_to_grid!(particles::Particles, field::Fields, grid::
     for i in 1:num_particles
 
         # Find cell center closest to but less than x[i]
-        j, j_plus_1, δⱼ, δⱼ₊₁ = linear_weighting(x[i], Δx, xmin, num_gridpts)
+        j, j_plus_1, δⱼ, δⱼ₊₁ = linear_weighting(x[i], Δx, 0.0, num_gridpts)
 
         δρⱼ = W * δⱼ
         δρⱼ₊₁ = W * δⱼ₊₁
@@ -254,13 +297,13 @@ function interpolate_charge_to_grid!(particles::Particles, field::Fields, grid::
 end
 
 function interpolate_fields_to_particles!(particles::Particles, fields::Fields, grid::Grid)
-    (; Δx, num_gridpts, xmin) = grid
+    (; Δx, num_gridpts) = grid
     (; num_particles, x) = particles
     (; Ex, Ey, Bz) = fields
 
     for i in 1:num_particles
         # Find cell center closest to but less than x[i]
-        j, j_plus_1, δⱼ, δⱼ₊₁ = linear_weighting(x[i], Δx, xmin, num_gridpts)
+        j, j_plus_1, δⱼ, δⱼ₊₁ = linear_weighting(x[i], Δx, 0.0, num_gridpts)
 
         # Interpolate fields on grid points to particles
         particles.Ex[i] = δⱼ * Ex[j] + δⱼ₊₁ * Ex[j_plus_1]
@@ -275,14 +318,14 @@ end
 Initialize simulation, aka allocate arrays for grid, particles, and fields
 Then distribute particles and compute the initial fields
 """
-function initialize(num_particles, max_particles, num_gridpts, xmin, xmax; perturbation_amplitude = 0.0, perturbation_wavenumber = 2π, perturbation_speed = 0.0, charge_per_particle = 1)
+function initialize(num_particles, num_gridpts, Lx, Ly = 1.0, Lz = 1.0; perturbation_amplitude = 0.0, perturbation_wavenumber = 2π, perturbation_speed = 0.0, charge_per_particle = 1)
 
-    grid = Grid(;num_gridpts, xmin, xmax)
-    particles = Particles(num_particles, max_particles, grid)
+    grid = Grid(;num_gridpts, Lx, Ly, Lz)
+    particles = Particles(num_particles, grid)
     fields = Fields(num_gridpts; charge_per_particle)
 
     # Perturb particle positions
-    perturb!(particles, perturbation_amplitude, perturbation_wavenumber, perturbation_speed, grid.L)
+    perturb!(particles, perturbation_amplitude, perturbation_wavenumber, perturbation_speed, grid.Lx)
 
     # Compute initial charge density and fields
     update!(particles, fields, particles, fields, grid, 0.0, push_particles=false)
@@ -459,6 +502,7 @@ function plot_vdf(vx, vy; type="1D", vlims, t = nothing, style = :scatter, bins 
             aspect_ratio, 
             title, xlabel, ylabel,
             show_empty_bins = true,
+            cbar = false,
             kwargs...
         )
     elseif style == :scatter
@@ -483,6 +527,61 @@ function animate_vdf(vx, vy; ts, dir = "", suffix = "", frameskip=0, type = "1D"
         frame(anim)
     end
     gif(anim, joinpath(dir, "anim_vdf_$(type)_$(suffix).mp4"))
+end
+
+function fft_time(t, x, n; kmax = Inf)
+    N = size(n, 1)
+
+    Δx = x[2] - x[1]
+    
+    ks = (2π * fftshift(fftfreq(N, 1/Δx)))[N÷2+1:end]
+
+    last_k_ind = findfirst(>(kmax), ks)
+
+    if isnothing(last_k_ind)
+        last_k_ind = lastindex(ks)        
+    end
+    
+    ks = ks[2:last_k_ind]
+
+    ñ = (abs.(fftshift(fft(n, 1))).^2)[N÷2+1:end, :]'[:, 2:last_k_ind]
+
+    ñ = zeros(length(ks), length(t))
+
+    for i in 1:length(t)
+        n_slice = n[:, i]
+        ñ[:, i] = (abs.(fftshift(fft(n_slice))).^2)[N÷2+1:end][2:last_k_ind]
+    end
+    return ks, ñ
+end
+
+function fft_field(t, x, n; kmax = Inf, ωmax = Inf)
+    N = size(n, 1)
+    Nt = size(n, 2)
+
+    Δx = x[2] - x[1]
+    Δt = t[2] - t[1]
+    
+    ks = (2π * fftshift(fftfreq(N, 1/Δx)))[N÷2+1:end]
+    ωs = (2π * fftshift(fftfreq(Nt, 1/Δt)))[Nt÷2+1:end]
+
+    last_ω_ind = findfirst(>(ωmax), ωs)
+    last_k_ind = findfirst(>(kmax), ks)
+
+    if isnothing(last_ω_ind)
+        last_ω_ind = lastindex(ωs) 
+    end
+
+    if isnothing(last_k_ind)
+        last_k_ind = lastindex(ks)        
+    end
+    
+    ks = ks[2:last_k_ind]
+    ωs = ωs[1:last_ω_ind]
+
+    ñ = (abs.(fftshift(fft(n))).^2)[N÷2+1:end, Nt÷2+1:end]'[1:last_ω_ind, 2:last_k_ind]
+
+    return ks, ωs, ñ
 end
 
 

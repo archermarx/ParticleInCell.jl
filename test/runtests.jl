@@ -7,7 +7,6 @@ using StatsBase
 using Plots.PlotMeasures
 using LsqFit
 
-
 function allapprox(x::AbstractVector{T1}, y::AbstractVector{T2}, atol = sqrt(max(eps(T1), eps(T2)))) where {T1, T2}
     return all(isapprox.(x, y, atol=atol))
 end
@@ -22,26 +21,26 @@ function compute_frequency(signal, Δt)
 end
 
 @testset "Particle initialization" begin
-    xmin, xmax = 0.0, 1.0
     num_gridpts = 100
 
-    grid = ParticleInCell.Grid(;xmin, xmax, num_gridpts)
+    xmax = 1.0
+
+    grid = ParticleInCell.Grid(;Lx = xmax, Ly = 1.0, Lz = 1.0, num_gridpts)
 
     # 1. When number of particles equals number of grid points, then particles are
     # initialized on cell centers (not hard-coded, but the way i distribute particles)
     # should have this property
     num_particles = num_gridpts
-    max_particles = 2*num_particles
-    particles = ParticleInCell.Particles(num_particles, max_particles, grid)
-    (;x, vx, vy, Ex, Ey, Bz) = particles
+    particles = ParticleInCell.Particles(num_particles, grid)
+    (;x, y, z, vx, vy, vz, Ex, Ey, Bz, weights) = particles
 
     # Check that arrays have correct length
-    @test length(x) == max_particles
-    @test length(vx) == max_particles
-    @test length(vy) == max_particles
-    @test length(Ex) == max_particles
-    @test length(Ey) == max_particles
-    @test length(Bz) == max_particles
+    @test length(x) == num_particles
+    @test length(vx) == num_particles
+    @test length(vy) == num_particles
+    @test length(Ex) == num_particles
+    @test length(Ey) == num_particles
+    @test length(Bz) == num_particles
     @test particles.num_particles == num_particles
 
     # Check that velocities and forces are correctly initialized
@@ -52,17 +51,16 @@ end
     @test all(Bz[1:num_particles] .== 0.0) && all(isnan, Bz[num_particles+1:end])
 
     # Check that positions are uniformly-distributed
-    @test isapprox(x[1], xmin+grid.Δx/2, atol = sqrt(eps(Float64)))
+    @test isapprox(x[1], grid.Δx/2, atol = sqrt(eps(Float64)))
     @test isapprox(x[num_particles], xmax-grid.Δx/2, atol = sqrt(eps(Float64)))
     @test all(isnan, x[num_particles+1:end])
     @test all(diff(x[1:num_particles]) .≈ grid.Δx)
 
     # 2. Otherwise, the distance between particles is still uniform
     num_particles = 701
-    max_particles = 2 * num_particles
-    particles = ParticleInCell.Particles(num_particles, max_particles, grid)
+    particles = ParticleInCell.Particles(num_particles,  grid)
 
-    diffs = [diff(particles.x[1:num_particles]); particles.x[1] - (particles.x[num_particles] - grid.L)]
+    diffs = [diff(particles.x); particles.x[1] - (particles.x[end] - grid.Lx)]
     all_diffs_equal = true
     diff1 = diffs[1]
     for i in 2:lastindex(diffs)
@@ -91,12 +89,19 @@ end
 end
 
 @testset "Grid initialization" begin
-    xmin = 5.0
-    xmax = 10.0
+    Lx = 5.0
+    Ly = 5.0
+    Lz = 5.0
     num_gridpts = 5
+    g = ParticleInCell.Grid(;Lx, Ly, Lz, num_gridpts)
 
-    @test ParticleInCell.Grid(;xmin, xmax, num_gridpts).Δx == 1.0
-    @test ParticleInCell.Grid(;xmin, xmax, num_gridpts).L == 5.0
+    @test g.Δx == 1.0
+    @test g.Lx == Lx
+    @test g.Ly == Ly
+    @test g.Lz == Lz
+    @test g.x[2] - g.x[1] ≈ g.Δx
+    @test g.x[1] ≈ g.Δx/2
+    @test g.x[end] ≈ Lx - g.Δx/2
 end
 
 @testset "Particle location" begin
@@ -157,15 +162,14 @@ end
 
 # TODO: add tests for when number of particles is less than the number of cells
 @testset "Charge and current density initialization" begin
-        xmin, xmax = 0.0, 1.0
+        xmax = 1.0
         num_gridpts = 100
 
         for particles_per_cell in 1.0:0.2:10
             num_particles = round(Int, particles_per_cell*num_gridpts)
-            max_particles = 2*num_particles
 
             # Initialize particles, grid, fields
-            particles, fields, grid = ParticleInCell.initialize(num_particles, max_particles, num_gridpts, xmin, xmax)
+            particles, fields, grid = ParticleInCell.initialize(num_particles, num_gridpts, xmax)
 
             # check that charge density is equal to 1 when particles are uniformly initialized
             @test all(isapprox.(fields.ρ, 1.0, rtol = 1/particles_per_cell^2))
@@ -178,16 +182,14 @@ end
 
 # If particles are initialized uniformly, they shouldn't move at all.
 @testset "No self-acceleration" begin
-    xmin = 0.0
     xmax = 1.0
     Δx = 0.01
     Δt = 0.01
     particles_per_cell = 5
     num_gridpts = 101
     num_particles = particles_per_cell * num_gridpts
-    max_particles = num_particles
 
-    particles, fields, grid = ParticleInCell.initialize(num_particles, max_particles, num_gridpts, xmin, xmax)
+    particles, fields, grid = ParticleInCell.initialize(num_particles, num_gridpts, xmax)
 
     x0 = copy(particles.x)
     vx0 = copy(particles.vx)
@@ -235,11 +237,11 @@ end
     # test neutrality on gyro-orbits (single particle)
     num_particles = 1
     num_gridpts = 10
-    xmin = -2.0
-    xmax = 2.0
+    xmin = 0.0
+    xmax = 4.0
 
-    grid = ParticleInCell.Grid(;xmin, xmax, num_gridpts)
-    particles = ParticleInCell.Particles(num_particles, num_particles, grid)
+    grid = ParticleInCell.Grid(;Lx = xmax, Ly = 1.0, Lz = 1.0, num_gridpts)
+    particles = ParticleInCell.Particles(num_particles, grid)
 
     # particle has y velocity of 1 and the background magnetic field has strength 1
     particles.vy[1] = 1.0
@@ -285,10 +287,9 @@ function test_two_particle_oscillation(num_gridpts, xmax, perturbation, max_time
     Δx = (xmax - xmin) / num_gridpts
     Δt = 0.1
     num_particles = 2
-    max_particles = 2
     num_timesteps = ceil(Int, max_time/Δt)
 
-    particles, fields, grid = ParticleInCell.initialize(num_particles, max_particles, num_gridpts, xmin, xmax)
+    particles, fields, grid = ParticleInCell.initialize(num_particles, num_gridpts, xmax)
 
     ts = LinRange(0, max_time / 2π, num_timesteps)
     x1s = zeros(num_timesteps)
@@ -348,21 +349,20 @@ end
 @testset "Density computation with perturbation" begin
     # This test checks that if we perturb all particle positions sinusoidally by a small value,
     # then the resulting charge density should follow an expected form
-    xmin = 0.0
     Δx = 0.01
     Δt = 0.01
     particles_per_cell = 51
     num_gridpts = 101
     num_particles = particles_per_cell * num_gridpts
-    max_particles = 1 * num_particles
+    num_particles = 1 * num_particles
 
     for xmax in [0.1, 1.0, π]
-        Δx = (xmax - xmin) / num_gridpts
-        L = xmax - xmin + Δx
+        Δx = xmax / num_gridpts
+        L = xmax + Δx
         for perturb_amp in [0.015, 0.01, 0.005, 0.001]
             for perturb_k in [1, 2, 3, 4, 5]
                 particles, fields, grid = ParticleInCell.initialize(
-                    num_particles, max_particles, num_gridpts, xmin, xmax,
+                    num_particles, num_gridpts, xmax,
                     perturbation_amplitude = perturb_amp, perturbation_wavenumber = perturb_k
                 )
 
@@ -384,16 +384,14 @@ end
 end
 
 @testset "Periodic BCs on moving uniform charge" begin
-    xmin = 0.0
-    xmax = 1.0
+    Lx = 1.0
     Δx = 1.0
     Δt = 0.01
     particles_per_cell = 2
     num_gridpts = 11
     num_particles = particles_per_cell * num_gridpts
-    max_particles = num_particles
 
-    particles, fields, grid = ParticleInCell.initialize(num_particles, max_particles, num_gridpts, xmin, xmax)
+    particles, fields, grid = ParticleInCell.initialize(num_particles, num_gridpts, Lx)
 
     # add rightward-moving velocity to all particles
     for i in 1:num_particles
@@ -404,8 +402,8 @@ end
 
     E_cache = zeros(num_gridpts, num_timesteps+1)
     ρ_cache = zeros(num_gridpts, num_timesteps+1)
-    x_cache = zeros(max_particles, num_timesteps+1)
-    vx_cache = zeros(max_particles, num_timesteps+1)
+    x_cache = zeros(num_particles, num_timesteps+1)
+    vx_cache = zeros(num_particles, num_timesteps+1)
 
     E_cache[:, 1] = fields.Ex
     ρ_cache[:, 1] = fields.ρ
@@ -427,15 +425,13 @@ end
 
 @testset "Particle charge scaling" begin
     # Test charged particle scaling
-    xmin, xmax = 0.0, 1.0
+    Lx = 1.0
     num_gridpts = 100
 
     for particles_per_cell in 1.0:0.2:10
         num_particles = round(Int, particles_per_cell*num_gridpts)
-        max_particles = 2*num_particles
-
         # Initialize particles, grid, fields
-        particles, fields, grid = ParticleInCell.initialize(num_particles, max_particles, num_gridpts, xmin, xmax, charge_per_particle=2)
+        particles, fields, grid = ParticleInCell.initialize(num_particles, num_gridpts, Lx, charge_per_particle=2)
 
         # check that charge density is equal to 1 when particles are uniformly initialized
         @test all(isapprox.(fields.ρ, 2.0, rtol = 1/particles_per_cell^2))
