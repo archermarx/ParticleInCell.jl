@@ -23,35 +23,14 @@ function warm_plasma_waves(;path, quiet = false, N=256, N_ppc=256, xmax=2π, Δt
     # Initialize particles with maxwellian Vdf and sinusoidal perturbation
     N_p = N * N_ppc
 
-    particles, fields, grid = ParticleInCell.initialize(N_p, N, xmax)
+    ions, electrons, fields, grid = ParticleInCell.initialize(N_p, N, xmax; mi = Inf)
 
-    ParticleInCell.maxwellian_vdf!(particles, thermal_velocity; quiet)
-    ParticleInCell.perturb!(particles, amplitude, wavenumber, wavespeed, xmax)
+    ParticleInCell.maxwellian_vdf!(electrons, thermal_velocity; quiet)
+    ParticleInCell.perturb!(electrons, amplitude, wavenumber, wavespeed, xmax)
 
-    num_timesteps = ceil(Int, tmax / Δt)
+    (; t, x, E, ni, ne) = ParticleInCell.simulate(ions, electrons, fields, grid; Δt, tmax)
 
-    E_cache = zeros(N, num_timesteps+1)
-    δρ_cache = zeros(N, num_timesteps+1)
-    v_cache = zeros(N_p, num_timesteps+1)
-    x_cache = zeros(N_p, num_timesteps+1)
-    T_cache = zeros(num_timesteps+1)
-
-    E_cache[:, 1] = fields.Ex
-    δρ_cache[:, 1] = fields.ρ .- 1
-    v_cache[:, 1] = particles.vx
-    x_cache[:, 1] = particles.x
-   # T_cache[1] = kinetic_energy(particles, xmax)
-
-    for i in 2:num_timesteps+1
-        ParticleInCell.update!(particles, fields, grid, Δt)
-        E_cache[:, i] = copy(fields.Ex)
-        δρ_cache[:, i] = copy(fields.ρ) .- 1.0
-        v_cache[:, i] = copy(particles.vx)
-        x_cache[:, i] = copy(particles.x)
-        #T_cache[i] = kinetic_energy(particles, xmax)
-    end
-
-    t = LinRange(0, tmax, num_timesteps+1)
+    ρ = ne .+ ni
 
     contour_options = (;
         ylims = (0, 1), yticks = LinRange(0, 1, 6), linewidth = 0, right_margin = 30mm, 
@@ -59,8 +38,8 @@ function warm_plasma_waves(;path, quiet = false, N=256, N_ppc=256, xmax=2π, Δt
         PLOT_SCALING_OPTIONS ...
     )
 
-    contour_E = contourf(t ./ 2π, grid.x ./ 2π, E_cache; title = "δE / mcωp", contour_options...)
-    contour_ρ = contourf(t ./ 2π, grid.x ./ 2π, δρ_cache; title = "δn / n₀", contour_options...)
+    contour_E = contourf(t ./ 2π, grid.x ./ 2π, E; title = "δE / mcωp", contour_options...)
+    contour_ρ = contourf(t ./ 2π, grid.x ./ 2π, ρ; title = "δn / n₀", contour_options...)
 
     p = plot(contour_ρ, contour_E, layout = (2, 1), size = (VERTICAL_RES, VERTICAL_RES))
 
@@ -68,7 +47,7 @@ function warm_plasma_waves(;path, quiet = false, N=256, N_ppc=256, xmax=2π, Δt
 
     savefig(p, joinpath(path, "$(suffix).png"))
 
-    return (t = t, x = grid.x, n = δρ_cache, E = E_cache, xs = x_cache, vs = v_cache)
+    return (t = t, x = grid.x, n = E, E, xs = results.electrons.x, vs = results.electrons.vx)
 end
 
 begin

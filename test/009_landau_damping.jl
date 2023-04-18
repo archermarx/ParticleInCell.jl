@@ -20,28 +20,24 @@ const PLOT_SCALING_OPTIONS = (;
     framestyle=:box,
 )
 
-
 # Problem 3: Landau damping
 function landau_damping(N, N_ppc; wavenumber, wave_speed, amplitude, v_th = 0.04, xmax, tmax, quiet)
     N_p = N * N_ppc
-    xmin = 0.0
     Δt = 0.2
 
-    particles, fields, grid = ParticleInCell.initialize(
-        N_p, N, xmax; charge_per_particle = 1
-    )
+    ions, electrons, fields, grid = ParticleInCell.initialize(N_p, N, xmax;)
 
-    ParticleInCell.maxwellian_vdf!(particles, v_th; quiet)
+    ParticleInCell.maxwellian_vdf!(electrons, v_th; quiet)
 
     # Perturb particles to establish travelling wave
     for i in 1:N_p
-        δx = amplitude / wavenumber * cos(wavenumber * particles.x[i])
-        δv = wave_speed * amplitude * sin(wavenumber * particles.x[i])
-        particles.x[i] += δx
-        particles.vx[i] += δv
+        δx = amplitude / wavenumber * cos(wavenumber * electrons.x[i])
+        δv = wave_speed * amplitude * sin(wavenumber * electrons.x[i])
+        electrons.x[i] += δx
+        electrons.vx[i] += δv
     end
 
-    return ParticleInCell.simulate(particles, fields, grid; Δt, tmax)
+    return ParticleInCell.simulate(ions, electrons, fields, grid; Δt, tmax)
 end
 
 for quiet in [true, false]
@@ -53,8 +49,15 @@ for quiet in [true, false]
     v_th = 0.04
     N = 1024
     N_ppc = 1024
-    @time t, x, xs, vxs, vys, ns, Es = landau_damping(N, N_ppc; wavenumber, v_th, wave_speed, amplitude, xmax, tmax, quiet)
-    
+    @time results = landau_damping(N, N_ppc; wavenumber, v_th, wave_speed, amplitude, xmax, tmax, quiet)
+
+    (;t, x) = results
+    ns = results.ρ
+    Es = results.E
+    xs = results.electrons.x
+    vxs = results.electrons.vx
+    vys = results.electrons.vy
+
     plot_size = (1080, 1080)
     margin = 10Plots.mm
 

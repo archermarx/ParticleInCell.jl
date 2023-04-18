@@ -30,26 +30,32 @@ function magnetized_ring(B0 = 1/√(5))
     δn = 0.001
     v0 = 4.5 * B0 / k
 
-    particles, fields, grid = ParticleInCell.initialize(
+    ions, electrons, fields, grid = ParticleInCell.initialize(
         N_p, N, xmax;
     )
 
     # Perturb particles
     for i = 1:N_p
-        δx = δn * sin(k * particles.x[i]) / k
+        δx = δn * sin(k * electrons.x[i]) / k
         θᵢ = 73 * (2π * i / N_p)
         vx = v0 * cos(θᵢ)
         vy = v0 * sin(θᵢ)
 
-        particles.x[i] += δx
-        particles.vx[i] = vx
-        particles.vy[i] = vy
+        electrons.x[i] += δx
+        electrons.vx[i] = vx
+        electrons.vy[i] = vy
     end
 
-    return ParticleInCell.simulate(particles, fields, grid; Δt, tmax, B0)
+    return ParticleInCell.simulate(ions, electrons, fields, grid; Δt, tmax, B0)
 end
 
-function plot_magnetized_ring(t, x, xs, vxs, vys, n, E; suffix = "" , animate = false)
+function plot_magnetized_ring(results; suffix = "" , animate = false)
+
+    (;t, x, ρ, E) = results
+    xs = results.electrons.x
+    vxs = results.electrons.vx
+    vys = results.electrons.vy
+
     plot_size = (1660, 1080)
     fx_initial = ParticleInCell.plot_vdf(xs[:, 1], vys[:, 1], type="1D", vlims = (-0.25, 0.25), t = t[1])
     fx_final = ParticleInCell.plot_vdf(xs[:, end], vys[:, end], type="1D", vlims = (-0.25, 0.25), t = t[end])
@@ -69,7 +75,8 @@ function plot_magnetized_ring(t, x, xs, vxs, vys, n, E; suffix = "" , animate = 
     n_amplitude = zeros(length(t))
     E_amplitude = zeros(length(t))
     for i in 1:length(t)
-        n_amplitude[i] = maximum(n[:, i]) - 1.0
+        min_ρ, max_ρ = extrema(ρ[:, i])
+        n_amplitude[i] = max_ρ - min_ρ
         E_amplitude[i] = sqrt(sum(E[:, i].^2 ./ 2))
     end
 
@@ -111,7 +118,7 @@ function plot_magnetized_ring(t, x, xs, vxs, vys, n, E; suffix = "" , animate = 
     )
 
     contour_E = contourf(t ./ 2π, x ./ 2π, E; title = "δE / mcωp", contour_options...)
-    contour_ρ = contourf(t ./ 2π, x ./ 2π, n .- 1.0; title = "δn / n₀", contour_options...)
+    contour_ρ = contourf(t ./ 2π, x ./ 2π, ρ .- 1.0; title = "δn / n₀", contour_options...)
 
     p = plot(contour_ρ, contour_E, layout = (2, 1), size = (VERTICAL_RES, VERTICAL_RES))
 
@@ -121,11 +128,11 @@ function plot_magnetized_ring(t, x, xs, vxs, vys, n, E; suffix = "" , animate = 
 end
 
 let animate = false
-    t, x_stable, xs_stable, vxs_stable, vys_stable, n_stable, E_stable = magnetized_ring(1 / √(5))
-    plot_magnetized_ring(t, x_stable, xs_stable, vxs_stable, vys_stable, n_stable, E_stable; animate, suffix = "ring_stable")
+    results = magnetized_ring(1 / √(5))
+    plot_magnetized_ring(results; animate, suffix = "ring_stable")
 end
 
 let animate = false
-    t, x_unstable, xs_unstable, vxs_unstable, vys_unstable, n_unstable, E_unstable = magnetized_ring(1 / √(10))
-    plot_magnetized_ring(t, x_unstable, xs_unstable, vxs_unstable, vys_unstable, n_unstable, E_unstable; animate, suffix = "ring_unstable")
+    results = magnetized_ring(1 / √(10))
+    plot_magnetized_ring(results; animate, suffix = "ring_unstable")
 end

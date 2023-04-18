@@ -20,7 +20,6 @@ const PLOT_SCALING_OPTIONS = (;
 )
 
 
-
 function two_stream_instability(N = 64, N_ppc = 16; v0 = 3, k = √(3) / 2v0, periods = 1, tmax = 40)
     N_p = N * N_ppc
     xmax = 2π / k * periods #8π*√(3) * periods
@@ -28,24 +27,24 @@ function two_stream_instability(N = 64, N_ppc = 16; v0 = 3, k = √(3) / 2v0, pe
     Δt = 0.2
     δn = 0.001
 
-    particles, fields, grid = ParticleInCell.initialize(
-        N_p, N, xmax; charge_per_particle = 2
+    ions, electrons, fields, grid = ParticleInCell.initialize(
+        N_p, N, xmax; ion_charge = 2.0, electron_charge = -2.0
     )
 
     # Perturb particles
     for i = 1:N_p
-        δx = δn * sin(k * particles.x[i]) / k
+        δx = δn * sin(k * electrons.x[i]) / k
 
-        particles.x[i] += δx
+        electrons.x[i] += δx
 
         if iseven(i)
-            particles.vx[i] = v0
+            electrons.vx[i] = v0
         else
-            particles.vx[i] = -v0
+            electrons.vx[i] = -v0
         end
     end
 
-    return ParticleInCell.simulate(particles, fields, grid; Δt, tmax)
+    return ParticleInCell.simulate(ions, electrons, fields, grid; Δt, tmax)
 end
 
 begin
@@ -57,12 +56,17 @@ begin
     titles = ["√3/2", "1.1 √(2)"]
     tmax = 40
     for (i, (k, k_str)) in enumerate(zip([k1,k2], titles))
-        t, x, xs, vxs, vys, ns, Es = two_stream_instability(N, N_ppc; v0, k, periods = 50, tmax)
+        results = two_stream_instability(N, N_ppc; v0, k, periods = 50, tmax)
         
+        (; t, x, ρ, E) = results
+        xs = results.electrons.x
+        vxs = results.electrons.vx
+        vys = results.electrons.vy
+
         fft_ind = findfirst(>(4π), t)
         fft_range = 1:fft_ind
         vlims = (-8, 8)
-        ks, Ẽ = ParticleInCell.fft_time(t[fft_range], x, Es)
+        ks, Ẽ = ParticleInCell.fft_time(t[fft_range], x, E)
 
         hm = heatmap(ks, t[fft_range], log2.(Ẽ'); xlabel = "k", ylabel = "tωₚ", size = (1000, 1000), PLOT_SCALING_OPTIONS...)
         vline!([k], lw = 2, lc = :black, ls = :dash, label = "k₀")
@@ -73,8 +77,8 @@ begin
         display(hm)
         savefig(hm, joinpath(RESULT_PATH_007, "growth_two_stream_wavenumber_$(i).png"))
 
-        max_n = mapslices(maximum, abs.(ns), dims=1)'
-        max_E = mapslices(maximum, abs.(Es), dims=1)'
+        max_n = mapslices(ParticleInCell.peak_to_peak_amplitude, ρ, dims=1)'
+        max_E = mapslices(ParticleInCell.peak_to_peak_amplitude, E, dims=1)'
 
         p = plot(;
             margin=10Plots.mm,

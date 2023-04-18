@@ -24,7 +24,7 @@ function nonlinear_plasma_wave_exact(x, L, amplitude, wavenumber, max_modes=20)
     return n
 end
 
-let
+begin
     #===============================
     Test case 002: Nonlinear plasma waves
     ===============================#
@@ -45,10 +45,11 @@ let
     ) 
 
     # First, check to make sure initial condition is correctly computed
-    particles, fields, grid = ParticleInCell.initialize(N_p, N, xmax;
+    ions, electrons, fields, grid = ParticleInCell.initialize(N_p, N, xmax;
         perturbation_amplitude = amplitude,
         perturbation_wavenumber = 1,
         perturbation_speed = 1,
+        mi = Inf,
     )
 
     n_expected = nonlinear_plasma_wave_exact.(grid.x, xmax, amplitude, wavenumber)
@@ -59,9 +60,9 @@ let
         size = (1.5 * VERTICAL_RES, VERTICAL_RES), PLOT_SCALING_OPTIONS...,
         margin = 20Plots.mm
     )
-    plot!(p, grid.x, fields.ρ .- 1, label = "Numerical density", lw = 4)
+    plot!(p, grid.x, fields.ρ, label = "Numerical density", lw = 4)
     if amplitude ≤ 0.5
-        plot!(p, grid.x, n_expected .- 1, ls = :dash, label = "Analytical density", lw = 4, lc = :red)
+        plot!(p, grid.x, 1.0 .- n_expected, ls = :dash, label = "Analytical density", lw = 4, lc = :red)
     end
     plot!(p, grid.x, fields.Ex, label = "Electic field", lw = 4, lc = :black)
     display(p)

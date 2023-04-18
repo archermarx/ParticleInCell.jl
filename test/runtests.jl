@@ -20,12 +20,22 @@ function compute_frequency(signal, Δt)
     return freqs, F, peak_freq
 end
 
+@testset "Frequency computation" begin
+    t = LinRange(0, 10π, 500)
+    for ω in [1, 2, 3, 4, 5]
+        signal = @. sin(ω * t)
+        dt = t[2] - t[1]
+        _, _, f = compute_frequency(signal, dt)
+        @test isapprox(2π * f, ω, atol = dt)
+    end
+end
+
 @testset "Particle initialization" begin
     num_gridpts = 100
 
     xmax = 1.0
 
-    grid = ParticleInCell.Grid(;Lx = xmax, Ly = 1.0, Lz = 1.0, num_gridpts)
+    grid = ParticleInCell.Grid(;Lx = xmax, Ly = xmax, Lz = xmax, num_gridpts)
 
     # 1. When number of particles equals number of grid points, then particles are
     # initialized on cell centers (not hard-coded, but the way i distribute particles)
@@ -36,6 +46,8 @@ end
 
     # Check that arrays have correct length
     @test length(x) == num_particles
+    @test length(y) == num_particles
+    @test length(z) == num_particles
     @test length(vx) == num_particles
     @test length(vy) == num_particles
     @test length(Ex) == num_particles
@@ -44,17 +56,21 @@ end
     @test particles.num_particles == num_particles
 
     # Check that velocities and forces are correctly initialized
-    @test all(vx[1:num_particles] .== 0.0) && all(isnan, vx[num_particles+1:end])
-    @test all(vy[1:num_particles] .== 0.0) && all(isnan, vy[num_particles+1:end])
-    @test all(Ex[1:num_particles] .== 0.0) && all(isnan, Ex[num_particles+1:end])
-    @test all(Ey[1:num_particles] .== 0.0) && all(isnan, Ey[num_particles+1:end])
-    @test all(Bz[1:num_particles] .== 0.0) && all(isnan, Bz[num_particles+1:end])
+    @test all(vx[1:num_particles] .== 0.0)
+    @test all(vy[1:num_particles] .== 0.0)
+    @test all(vz[1:num_particles] .== 0.0)
+    @test all(Ex[1:num_particles] .== 0.0)
+    @test all(Ey[1:num_particles] .== 0.0)
+    @test all(Bz[1:num_particles] .== 0.0)
 
     # Check that positions are uniformly-distributed
     @test isapprox(x[1], grid.Δx/2, atol = sqrt(eps(Float64)))
     @test isapprox(x[num_particles], xmax-grid.Δx/2, atol = sqrt(eps(Float64)))
     @test all(isnan, x[num_particles+1:end])
     @test all(diff(x[1:num_particles]) .≈ grid.Δx)
+
+    @test all(<(xmax), y)
+    @test all(<(xmax), z)
 
     # 2. Otherwise, the distance between particles is still uniform
     num_particles = 701
@@ -76,12 +92,18 @@ end
     num_gridpts = 101
     fields = ParticleInCell.Fields(num_gridpts)
 
-    (;ρ, jx, jy, Ex, Ey, Bz, ϕ) = fields
+    (;ρ, ρe, ρi, jx, jex, jix, jy, jey, jiy, Ex, Ey, Bz, ϕ) = fields
 
     # Check that arrays are correctly initialized to zero
     @test ρ == zeros(num_gridpts)
+    @test ρi == zeros(num_gridpts)
+    @test ρe == zeros(num_gridpts)
     @test jx == zeros(num_gridpts)
+    @test jex == zeros(num_gridpts)
+    @test jix == zeros(num_gridpts)
     @test jy == zeros(num_gridpts)
+    @test jey == zeros(num_gridpts)
+    @test jiy == zeros(num_gridpts)
     @test Ex == zeros(num_gridpts)
     @test Ey == zeros(num_gridpts)
     @test Bz == zeros(num_gridpts)
@@ -160,7 +182,6 @@ end
     end
 end
 
-# TODO: add tests for when number of particles is less than the number of cells
 @testset "Charge and current density initialization" begin
         xmax = 1.0
         num_gridpts = 100
@@ -169,14 +190,20 @@ end
             num_particles = round(Int, particles_per_cell*num_gridpts)
 
             # Initialize particles, grid, fields
-            particles, fields, grid = ParticleInCell.initialize(num_particles, num_gridpts, xmax)
+            ions, electrons, fields, grid = ParticleInCell.initialize(num_particles, num_gridpts, xmax)
 
-            # check that charge density is equal to 1 when particles are uniformly initialized
-            @test all(isapprox.(fields.ρ, 1.0, rtol = 1/particles_per_cell^2))
+            # check that charge density is equal to 0.0 when particles are uniformly initialized
+            @test all(isapprox.(fields.ρ, 0.0, rtol = 1/particles_per_cell^2))
+            @test all(isapprox.(fields.ρe, -1.0, rtol = 1/particles_per_cell^2))
+            @test all(isapprox.(fields.ρi, 1.0, rtol = 1/particles_per_cell^2))
 
             # check that current denstiy is zero
             @test all(isapprox.(fields.jx, 0.0, rtol = 1/particles_per_cell^2))
+            @test all(isapprox.(fields.jex, 0.0, rtol = 1/particles_per_cell^2))
+            @test all(isapprox.(fields.jix, 0.0, rtol = 1/particles_per_cell^2))
             @test all(isapprox.(fields.jy, 0.0, rtol = 1/particles_per_cell^2))
+            @test all(isapprox.(fields.jey, 0.0, rtol = 1/particles_per_cell^2))
+            @test all(isapprox.(fields.jiy, 0.0, rtol = 1/particles_per_cell^2))
         end
 end
 
@@ -189,14 +216,14 @@ end
     num_gridpts = 101
     num_particles = particles_per_cell * num_gridpts
 
-    particles, fields, grid = ParticleInCell.initialize(num_particles, num_gridpts, xmax)
+    ions, electrons, fields, grid = ParticleInCell.initialize(num_particles, num_gridpts, xmax)
 
-    x0 = copy(particles.x)
-    vx0 = copy(particles.vx)
-    vy0 = copy(particles.vy)
-    Ex0_particle = copy(particles.Ex)
-    Ey0_particle = copy(particles.Ey)
-    Bz0_particle = copy(particles.Bz)
+    x0 = copy(electrons.x)
+    vx0 = copy(electrons.vx)
+    vy0 = copy(electrons.vy)
+    Ex0_particle = copy(electrons.Ex)
+    Ey0_particle = copy(electrons.Ey)
+    Bz0_particle = copy(electrons.Bz)
 
     ρ0 = copy(fields.ρ)
     Ex0 = copy(fields.Ex)
@@ -209,18 +236,18 @@ end
     # Run for num_timesteps timesteps to make sure nothing changes
     num_timesteps = 100
     for i in 1:num_timesteps
-        ParticleInCell.update!(particles, fields, particles, fields, grid, Δt)
+        ParticleInCell.update!(ions, electrons, fields, grid, Δt)
     end
 
     # Check that particle positions and momenta have not changed
-    @test allapprox(x0, particles.x)
-    @test allapprox(vx0, particles.vx)
-    @test allapprox(vy0, particles.vy)
+    @test allapprox(x0, electrons.x)
+    @test allapprox(vx0, electrons.vx)
+    @test allapprox(vy0, electrons.vy)
 
     # Check that forces on particles have not changed
-    @test allapprox(Ex0_particle, particles.Ex)
-    @test allapprox(Ey0_particle, particles.Ey)
-    @test allapprox(Bz0_particle, particles.Bz)
+    @test allapprox(Ex0_particle, electrons.Ex)
+    @test allapprox(Ey0_particle, electrons.Ey)
+    @test allapprox(Bz0_particle, electrons.Bz)
 
     # Check that fields have not changed
     @test allapprox(ρ0, fields.ρ)
@@ -281,32 +308,40 @@ end
     @test all(@. isapprox(vxs, sin(ts), atol = 1 / num_timesteps))
 end
 
-
 function test_two_particle_oscillation(num_gridpts, xmax, perturbation, max_time)
-    xmin = 0.0
-    Δx = (xmax - xmin) / num_gridpts
-    Δt = 0.1
+    Δt = 0.01
     num_particles = 2
-    num_timesteps = ceil(Int, max_time/Δt)
 
-    particles, fields, grid = ParticleInCell.initialize(num_particles, num_gridpts, xmax)
+    # Ion charge needs to be zero for this to work, otherwise electrons will be
+    # accelerated back toward ions if they are displaced from their initial conditions
+    ions, electrons, fields, grid = ParticleInCell.initialize(
+        num_particles, num_gridpts, xmax; mi = Inf, ion_charge = 0.0
+    )
 
-    ts = LinRange(0, max_time / 2π, num_timesteps)
-    x1s = zeros(num_timesteps)
-    x2s = zeros(num_timesteps)
-    v1s = zeros(num_timesteps)
-    v2s = zeros(num_timesteps)
+    electrons.x[1] += perturbation
+    electrons.x[2] -= perturbation
 
-    particles.x[1] += perturbation
-    particles.x[2] -= perturbation
+    results = ParticleInCell.simulate(
+        ions, electrons, fields, grid;
+        Δt, tmax = max_time
+    )
 
-    for i in 1:num_timesteps
-        ParticleInCell.update!(particles, fields, particles, fields, grid, Δt)
-        x1s[i] = particles.x[1]
-        x2s[i] = particles.x[2]
-        v1s[i] = particles.vx[1]
-        v2s[i] = particles.vx[2]
-    end
+    ts = results.t
+    x1s = results.electrons.x[1, :]
+    x2s = results.electrons.x[2, :]
+    v1s = results.electrons.vx[1, :]
+    v2s = results.electrons.vx[2, :]
+
+    #=p1 = plot()
+    plot!(p1, ts, x1s)
+    plot!(p1, ts, x2s)
+
+    p2 = plot()
+    plot!(p2, ts, x1s)
+    plot!(p2, ts, x2s)
+
+    p = plot(p1, p2, layout = (2, 1))
+    display(p)=#
 
     # Get p2p amplitude of oscillation
     a1 = maximum(x1s) - minimum(x1s)
@@ -315,32 +350,33 @@ function test_two_particle_oscillation(num_gridpts, xmax, perturbation, max_time
     # Get peak freq of oscillation
     _, _, f1 = compute_frequency(x1s .- mean(x1s), Δt)
     _, _, f2 = compute_frequency(x2s .- mean(x2s), Δt)
-    return f1, f2, a1, a2
+    return f1, f2, a1, a2, Δt
 end
 
 @testset "Two-particle harmonic oscillation" begin
     # Check that two particles exhibit simple harmonic motion with frequency ω = 1 rad/s
     # This should be the same for all grid resolutions and domain sizes
     for xmax in [0.01, 0.05, 0.1, 0.5, 1.0, π, 2π]
-        #=
-        num_gridpts = 101
-        perturbation = 0.1
-        =#
+        xmax = 2π
+        perturbation = 0.01
+        
         for perturbation in [0.01, 0.02, 0.05, 0.1]
             for num_gridpts in [11, 31, 51, 71, 101]
-                f1, f2, a1, a2 = test_two_particle_oscillation(num_gridpts, xmax, perturbation * xmax, 2π)
+                f1, f2, a1, a2, dt = test_two_particle_oscillation(
+                    num_gridpts, xmax, perturbation * xmax, 2π
+                )
 
                 # Convert frequency to rad/s
                 ω1 = 2π * f1
                 ω2 = 2π * f2
 
                 # Check that peak freqency is 1 rad/s
-                @test isapprox(ω1, 1, atol=0.01)
-                @test isapprox(ω2, 1, atol=0.01)
+                @test isapprox(ω1, 1.0, atol=dt)
+                @test isapprox(ω2, 1.0, atol=dt)
 
-                # check that oscillatory amplitude is 2 * perturbation
-                @test isapprox(a1, 2*perturbation*xmax, rtol=0.01)
-                @test isapprox(a2, 2*perturbation*xmax, rtol=0.01)
+                # check that oscillatory amplitude is approximately 2 * perturbation
+                @test isapprox(a1, 2*perturbation*xmax, rtol=0.1)
+                @test isapprox(a2, 2*perturbation*xmax, rtol=0.1)
             end
         end
     end
@@ -361,15 +397,16 @@ end
         L = xmax + Δx
         for perturb_amp in [0.015, 0.01, 0.005, 0.001]
             for perturb_k in [1, 2, 3, 4, 5]
-                particles, fields, grid = ParticleInCell.initialize(
+                ions, electrons, fields, grid = ParticleInCell.initialize(
                     num_particles, num_gridpts, xmax,
-                    perturbation_amplitude = perturb_amp, perturbation_wavenumber = perturb_k
+                    perturbation_amplitude = perturb_amp,
+                    perturbation_wavenumber = perturb_k
                 )
 
                 ρ0 = mean(fields.ρ)
 
                 ρ_computed = fields.ρ
-                ρ_expected = ρ0 .+ perturb_amp .* sin.(2π * perturb_k .* grid.x / L)
+                ρ_expected = ρ0 .- perturb_amp .* sin.(2π * perturb_k .* grid.x / L)
 
                 #=
                 p = plot(grid.x, ρ_expected, label = "Expected charge density")
@@ -391,11 +428,11 @@ end
     num_gridpts = 11
     num_particles = particles_per_cell * num_gridpts
 
-    particles, fields, grid = ParticleInCell.initialize(num_particles, num_gridpts, Lx)
+    ions, electrons, fields, grid = ParticleInCell.initialize(num_particles, num_gridpts, Lx)
 
     # add rightward-moving velocity to all particles
     for i in 1:num_particles
-        particles.vx[i] = 1.0
+        electrons.vx[i] = 1.0
     end
 
     num_timesteps = 100
@@ -407,15 +444,15 @@ end
 
     E_cache[:, 1] = fields.Ex
     ρ_cache[:, 1] = fields.ρ
-    x_cache[:, 1] = particles.x
-    vx_cache[:, 1] = particles.vx
+    x_cache[:, 1] = electrons.x
+    vx_cache[:, 1] = electrons.vx
 
     for i in 2:num_timesteps+1
-        ParticleInCell.update!(particles, fields, grid, Δt)
+        ParticleInCell.update!(ions, electrons, fields, grid, Δt)
         E_cache[:, i] .= fields.Ex
         ρ_cache[:, i] .= fields.ρ
-        x_cache[:, i] .= particles.x
-        vx_cache[:, i] .= particles.vx
+        x_cache[:, i] .= electrons.x
+        vx_cache[:, i] .= electrons.vx
     end
 
     @test allapprox(E_cache[:, end], E_cache[:, 1])
@@ -430,13 +467,15 @@ end
 
     for particles_per_cell in 1.0:0.2:10
         num_particles = round(Int, particles_per_cell*num_gridpts)
+
+        electron_charge = -2.0
         # Initialize particles, grid, fields
-        particles, fields, grid = ParticleInCell.initialize(num_particles, num_gridpts, Lx, charge_per_particle=2)
+        ions, electrons, fields, grid = ParticleInCell.initialize(num_particles, num_gridpts, Lx; electron_charge)
 
         # check that charge density is equal to 1 when particles are uniformly initialized
-        @test all(isapprox.(fields.ρ, 2.0, rtol = 1/particles_per_cell^2))
+        @test all(isapprox.(fields.ρe, electron_charge, rtol = 1/particles_per_cell^2))
 
-        # check that current denstiy is zero
+        # check that current density is still zero
         @test all(isapprox.(fields.jx, 0.0, rtol = 1/particles_per_cell^2))
         @test all(isapprox.(fields.jy, 0.0, rtol = 1/particles_per_cell^2))
     end

@@ -66,7 +66,7 @@ struct Particles
     num_particles::Int
 end
 
-function Particles(num_particles::Int, grid::Grid, mass = 1, charge = 1)
+function Particles(num_particles::Int, grid::Grid; mass = 1, charge = 1)
     # Initialize arrays to allow for a perscribed maximum number of particles, in case
     # new particles are created later in the simulation.
 
@@ -155,8 +155,14 @@ end
 
 struct Fields
     ρ::Vector{Float64}
+    ρi::Vector{Float64}
+    ρe::Vector{Float64}
     jx::Vector{Float64}
+    jex::Vector{Float64}
+    jix::Vector{Float64}
     jy::Vector{Float64}
+    jey::Vector{Float64}
+    jiy::Vector{Float64}
     Ex::Vector{Float64}
     Ey::Vector{Float64}
     ϕ::Vector{Float64}
@@ -166,14 +172,18 @@ struct Fields
     ϕ̃::Vector{Complex{Float64}}
     Ẽx::Vector{Complex{Float64}}
     Ẽy::Vector{Complex{Float64}}
-    # Scaling quantities
-    charge_per_particle::Int
 end
 
-function Fields(num_gridpts::Int; charge_per_particle = 1)
+function Fields(num_gridpts::Int)
     ρ = zeros(num_gridpts)
+    ρi = zeros(num_gridpts)
+    ρe = zeros(num_gridpts)
     jx = zeros(num_gridpts)
+    jex = zeros(num_gridpts)
+    jix = zeros(num_gridpts)
     jy = zeros(num_gridpts)
+    jey = zeros(num_gridpts)
+    jiy = zeros(num_gridpts)
     Ex = zeros(num_gridpts)
     Ey = zeros(num_gridpts)
     ϕ = zeros(num_gridpts)
@@ -185,7 +195,7 @@ function Fields(num_gridpts::Int; charge_per_particle = 1)
     Ẽx = zeros(Complex{Float64}, num_gridpts)
     Ẽy = zeros(Complex{Float64}, num_gridpts)
 
-    return Fields(ρ, jx, jy, Ex, Ey, ϕ, Bz, ρ̃, ϕ̃, Ẽx, Ẽy, charge_per_particle)
+    return Fields(ρ, ρi, ρe, jx, jex, jix, jy, jey, jiy, Ex, Ey, ϕ, Bz, ρ̃, ϕ̃, Ẽx, Ẽy)
 end
 
 
@@ -236,6 +246,8 @@ function push_particles!(new_particles::Particles, particles::Particles, grid::G
     return nothing
 end
 
+push_particles!(particles, grid, Δt) = push_particles!(particles, particles, grid, Δt)
+
 function locate_particle(x, Δx, xmin, num_gridpts)
     j = fld(x - xmin, Δx)
 
@@ -255,11 +267,10 @@ function linear_weighting(x, Δx, xmin, num_gridpts)
     return j, j_plus_1, δⱼ, δⱼ₊₁
 end
 
-function interpolate_charge_to_grid!(particles::Particles, field::Fields, grid::Grid)
+function interpolate_charge_to_grid!(ρ, jx, jy, particles::Particles, grid::Grid)
 
     (; num_gridpts, Δx) = grid
     (; num_particles, x, vx, vy, charge, weights) = particles
-    (; ρ, jx, jy, charge_per_particle) = field
 
     # zero charge and current densities
     Threads.@threads for j in 1:num_gridpts
@@ -272,7 +283,7 @@ function interpolate_charge_to_grid!(particles::Particles, field::Fields, grid::
         # Find cell center closest to but less than x[i]
         j, j_plus_1, δⱼ, δⱼ₊₁ = linear_weighting(x[i], Δx, 0.0, num_gridpts)
         
-        W = charge * charge_per_particle * weights[i]
+        W = charge * weights[i]
 
         δρⱼ = W * δⱼ
         δρⱼ₊₁ = W * δⱼ₊₁
@@ -290,7 +301,7 @@ function interpolate_charge_to_grid!(particles::Particles, field::Fields, grid::
         jy[j_plus_1] += δρⱼ₊₁ * vy[i]
     end
 
-    return nothing
+    return ρ, jx, jy
 end
 
 function interpolate_fields_to_particles!(particles::Particles, fields::Fields, grid::Grid)
@@ -315,21 +326,26 @@ end
 Initialize simulation, aka allocate arrays for grid, particles, and fields
 Then distribute particles and compute the initial fields
 """
-function initialize(num_particles, num_gridpts, Lx, Ly = 1.0, Lz = 1.0; perturbation_amplitude = 0.0, perturbation_wavenumber = 2π, perturbation_speed = 0.0, charge_per_particle = 1)
+function initialize(
+        num_particles, num_gridpts, Lx, Ly = 1.0, Lz = 1.0; 
+        mi = Inf, ion_charge = 1.0, electron_charge = -1.0, 
+        perturbation_amplitude = 0.0, perturbation_wavenumber = 2π, perturbation_speed = 0.0
+    )
 
     grid = Grid(;num_gridpts, Lx, Ly, Lz)
-    particles = Particles(num_particles, grid)
-    fields = Fields(num_gridpts; charge_per_particle)
+    electrons = Particles(num_particles, grid; charge = electron_charge)
+    ions = Particles(num_particles, grid; charge = ion_charge, mass = mi)
 
-    # Perturb particle positions
-    perturb!(particles, perturbation_amplitude, perturbation_wavenumber, perturbation_speed, grid.Lx)
+    fields = Fields(num_gridpts)
+
+    # Perturb electron positions
+    perturb!(electrons, perturbation_amplitude, perturbation_wavenumber, perturbation_speed, grid.Lx)
 
     # Compute initial charge density and fields
-    update!(particles, fields, particles, fields, grid, 0.0, push_particles=false)
+    update!(ions, electrons, fields, grid, 0.0, push_ions = false, push_electrons = false)
 
-    return particles, fields, grid
+    return ions, electrons, fields, grid
 end
-
 
 """
 Use FFT to compute potential and electric field using charge density
@@ -339,7 +355,7 @@ function solve_fields_on_grid!(fields::Fields, grid::Grid)
     (;ρ, ρ̃, Ex, Ey, ϕ, Ẽx, ϕ̃) = fields
 
     # Compute FFT of density
-    ρ̃ .= ρ
+    @. ρ̃ = ρ    
     fft!(ρ̃)
 
     # Compute potential and electric field in frequency domain
@@ -377,71 +393,132 @@ Perform one update step, which itself has four sub-steps
 3. Solve electric field and potential on grid
 4. Interpolate electric and magnetic fields to particles
 """
-function update!(new_particles::Particles, new_fields::Fields, particles::Particles, fields::Fields, grid::Grid, Δt; push_particles=true)
+function update!(ions::Particles, electrons::Particles, fields::Fields, grid::Grid, Δt; push_ions = true, push_electrons = true)
 
-    if push_particles
-        # Push particles to new positions and velocities
-        push_particles!(new_particles, particles, grid, Δt)
+    # Push particles to new positions and velocities
+    if push_electrons
+        push_particles!(electrons, grid, Δt)
+    end
+
+    if push_ions
+       push_particles!(ions, grid, Δt)
     end
 
     # Interpolate charge density to grid
-    interpolate_charge_to_grid!(new_particles, new_fields, grid)
+    (; ρ, ρi, ρe, jx, jix, jex, jy, jey, jiy) = fields
+    (; num_gridpts) = grid
+
+    interpolate_charge_to_grid!(ρe, jex, jey, electrons, grid)
+    interpolate_charge_to_grid!(ρi, jix, jiy, ions,      grid)
+
+    # Sum charge densities
+    Threads.@threads for i in 1:num_gridpts
+        ρ[i]  = ρe[i]  + ρi[i]
+        jx[i] = jex[i] + jix[i]
+        jy[i] = jey[i] + jiy[i]
+    end
 
     # Solve eletric fields on grid
-    solve_fields_on_grid!(new_fields, grid)
+    solve_fields_on_grid!(fields, grid)
 
     # Interpolate electric and magnetic fields to particles
-    interpolate_fields_to_particles!(new_particles, new_fields, grid)
+    interpolate_fields_to_particles!(electrons, fields, grid)
+    interpolate_fields_to_particles!(ions, fields, grid)
 
     return nothing
 end
 
-function update!(particles::Particles, fields::Fields, grid::Grid, Δt; push_particles = true)
-    update!(particles, fields, particles, fields, grid, Δt; push_particles)
-end
-
-function simulate(particles, fields, grid; Δt, tmax, B0 = 0.0)
+function simulate(ions, electrons, fields, grid; Δt, tmax, B0 = 0.0)
 
     N = length(fields.ρ)
-    N_p = particles.num_particles
+    N_p = ions.num_particles
+
+    mi = ions.mass
+    me = electrons.mass
+
+    # Ions are updated every ion_subcycle_interval iterations
+    ion_subcycle_interval = isinf(mi) ? typemax(Int) : floor(Int, sqrt(mi / me))
 
     # Compute number of timesteps
     num_timesteps = ceil(Int, tmax / Δt)
     t = LinRange(0, tmax, num_timesteps+1)
 
     # Initialize fields and charge densities
-    update!(particles, fields, particles, fields, grid, Δt, push_particles=false)
+    update!(ions, electrons, fields, grid, Δt; push_ions = false, push_electrons = false)
 
     # Initialize caches for variables
+    ρi_cache = zeros(N, num_timesteps+1)
+    ρe_cache = zeros(N, num_timesteps+1)
     E_cache  = zeros(N, num_timesteps+1)
-    n_cache = zeros(N, num_timesteps+1)
-    vx_cache = zeros(N_p, num_timesteps+1)
-    vy_cache = zeros(N_p, num_timesteps+1)
-    x_cache  = zeros(N_p, num_timesteps+1)
 
-    E_cache[:, 1] .= fields.Ex
-    n_cache[:, 1] .= fields.ρ
-    x_cache[:, 1] .= particles.x
-    vx_cache[:, 1] .= particles.vx
-    vy_cache[:, 1] .= particles.vy
+    xi_cache  = zeros(N_p, num_timesteps+1)
+    vix_cache = zeros(N_p, num_timesteps+1)
+    viy_cache = zeros(N_p, num_timesteps+1)
+
+    xe_cache  = zeros(N_p, num_timesteps+1)
+    vex_cache = zeros(N_p, num_timesteps+1)
+    vey_cache = zeros(N_p, num_timesteps+1)
+
+    ρi_cache[:, 1] .= fields.ρi
+    ρe_cache[:, 1] .= fields.ρe
+    E_cache[:, 1]  .= fields.Ex
+
+    xi_cache[:, 1] .= ions.x
+    vix_cache[:, 1] .= ions.vx
+    viy_cache[:, 1] .= ions.vy
+
+    xe_cache[:, 1] .= electrons.x
+    vex_cache[:, 1] .= electrons.vx
+    vey_cache[:, 1] .= electrons.vy
 
     # Assign magnetic field to fields and particles
     fields.Bz .= B0
-    particles.Bz .= B0
+    ions.Bz .= B0
+    electrons.Bz .= B0
 
     # Simulate
     for i in 2:num_timesteps+1
         # Push to next timestep
-        ParticleInCell.update!(particles, fields, grid, Δt)
-        # Save quantities
-        x_cache[:, i] .= particles.x
-        vx_cache[:, i] .= particles.vx
-        vy_cache[:, i] .= particles.vy
-        n_cache[:, i] .= fields.ρ
-        E_cache[:, i] .= fields.Ex
+        push_ions =
+            !isinf(mi) && 
+            ((i - 2) % ion_subcycle_interval == 0 || i == num_timesteps + 1)
+
+        ParticleInCell.update!(ions, electrons, fields, grid, Δt; push_ions)
+
+        # Save field quantities
+        Threads.@threads for j in 1:N
+            ρi_cache[j, i] = fields.ρi[j]
+            ρe_cache[j, i] = fields.ρe[j]
+            E_cache[j, i]  = fields.Ex[j]
+        end
+
+        # Save particle quantities
+        Threads.@threads for j in 1:N_p
+            # Ions
+            xi_cache[j, i]  = ions.x[j]
+            vix_cache[j, i] = ions.vx[j]
+            viy_cache[j, i] = ions.vy[j]
+
+            # Electrons
+            xe_cache[j, i]  = electrons.x[j]
+            vex_cache[j, i] = electrons.vx[j]
+            vey_cache[j, i] = electrons.vy[j]
+        end
     end
 
-    return t, grid.x, x_cache, vx_cache, vy_cache, n_cache, E_cache
+    results = (;
+        t, x = grid.x,
+        ρi = ρi_cache, ρe = ρe_cache, ρ = ρi_cache .+ ρe_cache,
+        E = E_cache,
+        electrons = (;
+            x = xe_cache, vx = vex_cache, vy = vey_cache
+        ),
+        ions = (;
+            x = xi_cache, vx = viy_cache, vy = viy_cache
+        ),
+    )
+
+    return results
 end
 
 # Postprocessing functions
@@ -580,6 +657,11 @@ function fft_field(t, x, n; kmax = Inf, ωmax = Inf)
     ñ = (abs.(fftshift(fft(n))).^2)[N÷2+1:end, Nt÷2+1:end]'[1:last_ω_ind, 2:last_k_ind]
 
     return ks, ωs, ñ
+end
+
+function peak_to_peak_amplitude(signal)
+    min_s, max_s = extrema(signal)
+    return max_s - min_s
 end
 
 

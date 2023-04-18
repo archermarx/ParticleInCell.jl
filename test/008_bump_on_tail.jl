@@ -26,19 +26,17 @@ function bump_on_tail(N, N_ppc; v_d = 3.0, v_th = 0.01, tmax = 30, ratio, quiet)
     tmax = tmax * π
     Δt = 0.2
 
-    particles, fields, grid = ParticleInCell.initialize(
-        N_p, N, xmax; charge_per_particle = 1
-    )
+    ions, electrons, fields, grid = ParticleInCell.initialize(N_p, N, xmax)
 
-    ParticleInCell.maxwellian_vdf!(particles, v_th; quiet)
+    ParticleInCell.maxwellian_vdf!(electrons, v_th; quiet)
 
     # Assign one in n_b_ratio particles to the beam
     for i in 1:ratio:N_p
-        particles.vx[i] = v_d
-        particles.vy[i] = 0.0
+        electrons.vx[i] = v_d
+        electrons.vy[i] = 0.0
     end
 
-    return ParticleInCell.simulate(particles, fields, grid; Δt, tmax)
+    return ParticleInCell.simulate(ions, electrons, fields, grid; Δt, tmax)
 end
 
 begin
@@ -65,7 +63,15 @@ begin
             PLOT_SCALING_OPTIONS...
         )
         for (i, ratio) in enumerate(ratios)
-            t, x, xs, vxs, vys, ns, Es = bump_on_tail(N, N_ppc; v_th, v_d, tmax, ratio, quiet)
+            results = bump_on_tail(N, N_ppc; v_th, v_d, tmax, ratio, quiet)
+            
+            (;t, x) = results
+            ns = results.ρ
+            Es = results.E
+            xs = results.electrons.x
+            vxs = results.electrons.vx
+            vys = results.electrons.vy
+
             vlims = (-0.5, 3.5)
 
             if ratio ∈ [2, 4, 8, 16, 32]
