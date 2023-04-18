@@ -7,18 +7,12 @@ using Printf
 using QuasiMonteCarlo
 using Distributions: quantile, Normal, pdf
 
-const WS6_RESULTS_DIR = mkpath("results/worksheet_6")
-const VERTICAL_RES = 1080
-const FONT_SIZE = round(Int, VERTICAL_RES/600 * 12)
-const PLOT_SCALING_OPTIONS = (;
-            titlefontsize=FONT_SIZE*3÷2,
-            legendfontsize=FONT_SIZE÷1.2,
-            xtickfontsize=FONT_SIZE,
-            ytickfontsize=FONT_SIZE,
-            xguidefontsize=FONT_SIZE,
-            yguidefontsize=FONT_SIZE,
-            framestyle=:box,
-)
+const c = 299_792_458.0
+const e = 1.602176634e-19
+const m_p = 1836.15267343
+const m_e = 9.1093837e-31
+const ϵ_0 = 8.85418782e-12
+const k_B = 1.380649e-23
 
 struct Grid
     x::AbstractVector{Float64}
@@ -67,10 +61,12 @@ struct Particles
     Bz::Vector{Float64}
     # Other
     weights::Vector{Float64}
+    mass::Float64
+    charge::Float64
     num_particles::Int
 end
 
-function Particles(num_particles::Int, grid::Grid)
+function Particles(num_particles::Int, grid::Grid, mass = 1, charge = 1)
     # Initialize arrays to allow for a perscribed maximum number of particles, in case
     # new particles are created later in the simulation.
 
@@ -91,7 +87,7 @@ function Particles(num_particles::Int, grid::Grid)
     N_ppc = num_particles / grid.num_gridpts
     weight = 1 / N_ppc
     weights = fill(weight, num_particles)
-    return Particles(x, y, z, vx, vy, vz, Ex, Ey, Bz, weights, num_particles)
+    return Particles(x, y, z, vx, vy, vz, Ex, Ey, Bz, weights, mass, charge, num_particles)
 end
 
 function distribute_particles(num_particles, grid)
@@ -195,21 +191,23 @@ end
 
 function push_particles!(new_particles::Particles, particles::Particles, grid::Grid, Δt)
 
-    (;x, y, z, vx, vy, vz, Ex, Ey, Bz, num_particles) = particles
+    (;x, y, z, vx, vy, vz, Ex, Ey, Bz, mass, charge, num_particles) = particles
     (; Lx, Ly, Lz) = grid
+
+    q_m = charge / mass
 
     # Loop through all particles in simulation and push them to new positions and velocities
     Threads.@threads for i in 1:num_particles
 
-        t = Bz[i] * Δt / 2
+        t = q_m * Bz[i] * Δt / 2
         s = 2 * t / (1 + t^2)
 
         x_new = x[i] + 0.5 * vx[i] * Δt
         y_new = y[i] + 0.5 * vy[i] * Δt
         z_new = z[i] + 0.5 * vz[i] * Δt
 
-        v_minus_x = vx[i] + 0.5 * Ex[i] * Δt
-        v_minus_y = vy[i] + 0.5 * Ey[i] * Δt
+        v_minus_x = vx[i] + 0.5 * q_m * Ex[i] * Δt
+        v_minus_y = vy[i] + 0.5 * q_m * Ey[i] * Δt
 
         v_star_x = v_minus_x + v_minus_y * t
         v_star_y = v_minus_y - v_minus_x * t
@@ -217,8 +215,8 @@ function push_particles!(new_particles::Particles, particles::Particles, grid::G
         v_plus_x = v_minus_x + v_star_y * s
         v_plus_y = v_minus_y - v_star_x * s
 
-        new_particles.vx[i] = v_plus_x + 0.5 * Ex[i] * Δt
-        new_particles.vy[i] = v_plus_y + 0.5 * Ey[i] * Δt
+        new_particles.vx[i] = v_plus_x + 0.5 * q_m * Ex[i] * Δt
+        new_particles.vy[i] = v_plus_y + 0.5 * q_m * Ey[i] * Δt
         new_particles.vz[i] = vz[i]
 
         x_new = x_new + 0.5 * new_particles.vx[i] * Δt
@@ -260,13 +258,11 @@ end
 function interpolate_charge_to_grid!(particles::Particles, field::Fields, grid::Grid)
 
     (; num_gridpts, Δx) = grid
-    (; num_particles, x, vx, vy) = particles
+    (; num_particles, x, vx, vy, charge, weights) = particles
     (; ρ, jx, jy, charge_per_particle) = field
 
-    W = charge_per_particle * num_gridpts / num_particles
-
     # zero charge and current densities
-    for j in 1:num_gridpts
+    Threads.@threads for j in 1:num_gridpts
         ρ[j] = 0.0
         jx[j] = 0.0
         jy[j] = 0.0
@@ -275,6 +271,8 @@ function interpolate_charge_to_grid!(particles::Particles, field::Fields, grid::
     for i in 1:num_particles
         # Find cell center closest to but less than x[i]
         j, j_plus_1, δⱼ, δⱼ₊₁ = linear_weighting(x[i], Δx, 0.0, num_gridpts)
+        
+        W = charge * charge_per_particle * weights[i]
 
         δρⱼ = W * δⱼ
         δρⱼ₊₁ = W * δⱼ₊₁
@@ -478,7 +476,7 @@ function plot_vdf(vx, vy; type="1D", vlims, t = nothing, style = :scatter, bins 
         aspect_ratio = 1
     end
 
-    p = plot(;
+    #=p = plot(;
         size = (1080, 1080),
         titlefontsize=FONT_SIZE*3÷2,
         legendfontsize=FONT_SIZE÷1.5,
@@ -487,7 +485,8 @@ function plot_vdf(vx, vy; type="1D", vlims, t = nothing, style = :scatter, bins 
         xguidefontsize=FONT_SIZE,
         yguidefontsize=FONT_SIZE,
         framestyle=:box,
-    )
+    )=#
+    p = plot(;size = (1080, 1080), kwargs...)
 
     nbins = isnothing(bins) ? 100 : bins
     xbins = LinRange(xlims[1], xlims[2], nbins)

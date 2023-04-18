@@ -50,7 +50,7 @@ begin
     v_th = 0.01
     v_d = 3.0
 
-    ratios = 2:2:32
+    ratios = [2, 4, 8, 16, 32]
 
     for quiet in [true, false]
         growthrates = zeros(length(ratios))

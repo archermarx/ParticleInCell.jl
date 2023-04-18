@@ -19,7 +19,6 @@ const PLOT_SCALING_OPTIONS = (;
     framestyle=:box,
 )
 
-
 begin
     # Problem 1: Gyro orbit preservation
     

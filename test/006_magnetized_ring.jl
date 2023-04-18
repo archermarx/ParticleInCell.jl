@@ -62,8 +62,8 @@ function plot_magnetized_ring(t, x, xs, vxs, vys, n, E; suffix = "" , animate = 
     savefig(fv_final, joinpath(RESULT_PATH_006, "vdf_final_2D_$(suffix).png"))
 
     if animate
-        ParticleInCell.animate_vdf(xs, vys; suffix, frameskip=2, type="1D", vlims = (-0.25, 0.25), ts = t, dir = RESULT_PATH_006)
-        ParticleInCell.animate_vdf(vxs, vys; suffix, frameskip=2, type="2D", vlims = (-0.25, 0.25), ts = t, dir = RESULT_PATH_006)
+        ParticleInCell.animate_vdf(xs, vys; suffix, frameskip=2, type="1D", vlims = (-0.25, 0.25), ts = t, dir = RESULT_PATH_006, PLOT_SCALING_OPTIONS...)
+        ParticleInCell.animate_vdf(vxs, vys; suffix, frameskip=2, type="2D", vlims = (-0.25, 0.25), ts = t, dir = RESULT_PATH_006, PLOT_SCALING_OPTIONS...)
     end
 
     n_amplitude = zeros(length(t))
@@ -76,15 +76,8 @@ function plot_magnetized_ring(t, x, xs, vxs, vys, n, E; suffix = "" , animate = 
     p_growth = plot(;
         xlabel = "tωp", ylabel = "Amplitude (arb.)", yaxis = :log,
         size = (1080, 1080),
-        titlefontsize=FONT_SIZE*3÷2,
-        legendfontsize=FONT_SIZE,
-        xtickfontsize=FONT_SIZE,
-        ytickfontsize=FONT_SIZE,
-        xguidefontsize=FONT_SIZE,
-        yguidefontsize=FONT_SIZE,
-        framestyle=:box,
-        legend = :bottomright,
         margin = 10Plots.mm,
+        PLOT_SCALING_OPTIONS...
     )
 
     plot!(t, n_amplitude, label = "n", lw = 2, lc = :red)
@@ -127,12 +120,12 @@ function plot_magnetized_ring(t, x, xs, vxs, vys, n, E; suffix = "" , animate = 
     savefig(p, joinpath(RESULT_PATH_006, "contour_$(suffix).png"))
 end
 
-let animate = true
+let animate = false
     t, x_stable, xs_stable, vxs_stable, vys_stable, n_stable, E_stable = magnetized_ring(1 / √(5))
     plot_magnetized_ring(t, x_stable, xs_stable, vxs_stable, vys_stable, n_stable, E_stable; animate, suffix = "ring_stable")
 end
 
-let animate = true
+let animate = false
     t, x_unstable, xs_unstable, vxs_unstable, vys_unstable, n_unstable, E_unstable = magnetized_ring(1 / √(10))
     plot_magnetized_ring(t, x_unstable, xs_unstable, vxs_unstable, vys_unstable, n_unstable, E_unstable; animate, suffix = "ring_unstable")
 end
