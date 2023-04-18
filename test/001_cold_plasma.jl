@@ -33,7 +33,7 @@ function cold_plasma_wave(;path, N=101, N_ppc=100, xmax=π, Δt=0.1, tmax=2π, a
 
     results = ParticleInCell.simulate(ions, electrons, fields, grid; Δt, tmax)
     
-    (; t, x, E, ne) = results
+    (; t, x, E, ρe) = results
 
     contour_options = (;
         ylims = (0, 1), yticks = LinRange(0, 1, 6), linewidth = 0, right_margin = 30mm, 
@@ -45,7 +45,7 @@ function cold_plasma_wave(;path, N=101, N_ppc=100, xmax=π, Δt=0.1, tmax=2π, a
     n = results.ne
 
     contour_E = contourf(t ./ 2π, x ./ 2π, E; title = "δE / mcωp", contour_options...)
-    contour_ρ = contourf(t ./ 2π, x ./ 2π, ne .+ 1.0; title = "δn / n₀", contour_options...)
+    contour_ρ = contourf(t ./ 2π, x ./ 2π, ρe .+ 1.0; title = "δn / n₀", contour_options...)
 
     p = plot(contour_ρ, contour_E, layout = (2, 1), size = (VERTICAL_RES, VERTICAL_RES))
 

@@ -248,6 +248,22 @@ end
 
 push_particles!(particles, grid, Δt) = push_particles!(particles, particles, grid, Δt)
 
+periodic_boundary(x, L) = x - floor(x / L) * L
+
+function apply_periodic_boundaries!(xs, L)
+    Threads.@threads for i in eachindex(xs)
+        xs[i] = periodic_boundary(xs[i], L)
+    end
+    return xs
+end
+
+function apply_periodic_boundaries!(particles::Particles, Lx, Ly, Lz)
+    apply_periodic_boundaries!(particles.x, Lx)
+    apply_periodic_boundaries!(particles.y, Ly)
+    apply_periodic_boundaries!(particles.z, Lz)
+    return nothing
+end
+
 function locate_particle(x, Δx, xmin, num_gridpts)
     j = fld(x - xmin, Δx)
 
@@ -428,7 +444,10 @@ function update!(ions::Particles, electrons::Particles, fields::Fields, grid::Gr
     return nothing
 end
 
-function simulate(ions, electrons, fields, grid; Δt, tmax, B0 = 0.0)
+function simulate(
+        ions, electrons, fields, grid; 
+        Δt, tmax, B0 = 0.0, solve_ions = true, solve_electrons = true
+    )
 
     N = length(fields.ρ)
     N_p = ions.num_particles
@@ -437,7 +456,7 @@ function simulate(ions, electrons, fields, grid; Δt, tmax, B0 = 0.0)
     me = electrons.mass
 
     # Ions are updated every ion_subcycle_interval iterations
-    ion_subcycle_interval = isinf(mi) ? typemax(Int) : floor(Int, sqrt(mi / me))
+    ion_subcycle_interval = isinf(mi) ? typemax(Int) : 1#floor(Int, sqrt(mi / me))
 
     # Compute number of timesteps
     num_timesteps = ceil(Int, tmax / Δt)
@@ -475,15 +494,22 @@ function simulate(ions, electrons, fields, grid; Δt, tmax, B0 = 0.0)
     fields.Bz .= B0
     ions.Bz .= B0
     electrons.Bz .= B0
+    
+    ParticleInCell.apply_periodic_boundaries!(electrons, grid.Lx, grid.Ly, grid.Lz)
+    ParticleInCell.apply_periodic_boundaries!(ions, grid.Lx, grid.Ly, grid.Lz)
+    ParticleInCell.update!(ions, electrons, fields, grid, Δt; push_ions = false, push_electrons = false)
 
     # Simulate
     for i in 2:num_timesteps+1
         # Push to next timestep
         push_ions =
+            solve_ions &&
             !isinf(mi) && 
             ((i - 2) % ion_subcycle_interval == 0 || i == num_timesteps + 1)
 
-        ParticleInCell.update!(ions, electrons, fields, grid, Δt; push_ions)
+        push_electrons = solve_electrons
+
+        ParticleInCell.update!(ions, electrons, fields, grid, Δt; push_ions, push_electrons)
 
         # Save field quantities
         Threads.@threads for j in 1:N
