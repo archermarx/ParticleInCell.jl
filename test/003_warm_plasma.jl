@@ -59,8 +59,8 @@ function warm_plasma_waves(;path, quiet = false, N=256, N_ppc=256, xmax=2π, Δt
         PLOT_SCALING_OPTIONS ...
     )
 
-    contour_E = contourf(t, grid.x ./ 2π, E_cache; title = "δE / mcωp", contour_options...)
-    contour_ρ = contourf(t, grid.x ./ 2π, δρ_cache; title = "δn / n₀", contour_options...)
+    contour_E = contourf(t ./ 2π, grid.x ./ 2π, E_cache; title = "δE / mcωp", contour_options...)
+    contour_ρ = contourf(t ./ 2π, grid.x ./ 2π, δρ_cache; title = "δn / n₀", contour_options...)
 
     p = plot(contour_ρ, contour_E, layout = (2, 1), size = (VERTICAL_RES, VERTICAL_RES))
 

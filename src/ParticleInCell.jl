@@ -273,7 +273,6 @@ function interpolate_charge_to_grid!(particles::Particles, field::Fields, grid::
     end
 
     for i in 1:num_particles
-
         # Find cell center closest to but less than x[i]
         j, j_plus_1, δⱼ, δⱼ₊₁ = linear_weighting(x[i], Δx, 0.0, num_gridpts)
 
@@ -301,7 +300,7 @@ function interpolate_fields_to_particles!(particles::Particles, fields::Fields, 
     (; num_particles, x) = particles
     (; Ex, Ey, Bz) = fields
 
-    for i in 1:num_particles
+    Threads.@threads for i in 1:num_particles
         # Find cell center closest to but less than x[i]
         j, j_plus_1, δⱼ, δⱼ₊₁ = linear_weighting(x[i], Δx, 0.0, num_gridpts)
 
@@ -346,7 +345,7 @@ function solve_fields_on_grid!(fields::Fields, grid::Grid)
     fft!(ρ̃)
 
     # Compute potential and electric field in frequency domain
-    for j in 1:num_gridpts
+    Threads.@threads for j in 1:num_gridpts
         if K[j] == 0.0
             ϕ̃[j] = 0.0
         else

@@ -212,7 +212,7 @@ begin
         v0 = 4.5 * B0 / k
 
         particles, fields, grid = ParticleInCell.initialize(
-            N_p, N_p, N, 0.0, xmax;
+            N_p, N, xmax;
         )
 
         # Perturb particles
