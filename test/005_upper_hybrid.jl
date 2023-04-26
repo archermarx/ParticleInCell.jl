@@ -49,8 +49,8 @@ function upper_hybrid_oscillation(;path = RESULT_PATH_005, N=101, N_ppc=100, B0 
 
     results = ParticleInCell.simulate(ions, electrons, fields, grid; Δt, tmax, B0)
 
-    (;E, ne, ni, t, x) = results
-    ρ = ne .+ ni
+    (;E, ρe, ρi, t, x) = results
+    ρ = ρe .+ ρi
 
     contour_options = (;
         ylims = (0, 1), yticks = LinRange(0, 1, 6), linewidth = 0, right_margin = 30mm, 
@@ -71,18 +71,18 @@ function upper_hybrid_oscillation(;path = RESULT_PATH_005, N=101, N_ppc=100, B0 
 
     savefig(p, joinpath(path, "$(suffix).png"))
 
-    return t, x, results.electrons.x, results.electrons.vx, results.electrons.vy, ne, E
+    return t, x, results.electrons.x, results.electrons.vx, results.electrons.vy, ρe, E
 end
 
 begin
     # Launch upper hybrid oscillations
-    #t, x, xs, vxs, vys, ρs, Es = upper_hybrid_oscillation(B0 = √(3), perturb = :vx, suffix="hybrid_perturb_vx")
-    #t, x, xs, vxs, vys, ρs, Es = upper_hybrid_oscillation(B0 = √(3), perturb = :x, suffix="hybrid_perturb_x")
+    t, x, xs, vxs, vys, ρs, Es = upper_hybrid_oscillation(B0 = √(3), perturb = :vx, suffix="hybrid_perturb_vx")
+    t, x, xs, vxs, vys, ρs, Es = upper_hybrid_oscillation(B0 = √(3), perturb = :x, suffix="hybrid_perturb_x")
     t, x, xs, vxs, vys, ρs, Es = upper_hybrid_oscillation(B0 = √(3), perturb = :vy, suffix="hybrid_perturb_vy")
 end
 
 begin
-    # Trajectory of single particle in the vy perturbatuion case
+    # Trajectory of single particle in the vy perturbationn case
     particle_id = 1
     px = plot(t[2:end], vxs[particle_id, 2:end], label = "", xlabel = "tωp", ylabel = "vx/c", title = "x-velocity")
     py = plot(t[2:end], vys[particle_id, 2:end], label = "", xlabel = "tωp", ylabel = "vy/c", title = "y-velocity")

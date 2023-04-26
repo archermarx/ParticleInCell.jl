@@ -37,11 +37,11 @@ begin
     particles.vx[1] = 0.0
     particles.vy[1] = 1.0
 
-    Bz = 1.0
-    particles.Bz[1] = 1.0
+    Bz = √(3)
+    particles.Bz[1] = Bz
 
     num_periods=10
-    tmax = 2π * num_periods
+    tmax = 2π * num_periods / Bz
     num_timesteps = round(Int, 20 * num_periods)
     Δt = tmax / num_timesteps
 
@@ -55,7 +55,6 @@ begin
     vys = [p.vy[] for p in particle_cache]
     velocity_magnitudes = hypot.(vxs, vys)
     
-
     # check that velocity magnitude has not changed from 1 (i.e. that energy is conserved)
     @show all(velocity_magnitudes .≈ 1)
 
@@ -67,10 +66,11 @@ begin
     ts = LinRange(0, tmax, num_timesteps+1)
 
     ts_analytic = 0:0.1:tmax
-    x_analytic = @. 1 + xs[1] - cos(ts_analytic)
-    y_analytic = @. ys[1] + sin(ts_analytic)
-    vx_analytic = @. sin.(ts_analytic)
-    vy_analytic = @. cos.(ts_analytic)
+    tωc = B0 * ts_analytic
+    x_analytic = @. 1/B0 + xs[1] - cos(tωc) / B0
+    y_analytic = @. ys[1] + sin(tωc) / B0 .- particles.vy[1] * Δt/2
+    vx_analytic = @. sin.(tωc)
+    vy_analytic = @. cos.(tωc)
 
     p = plot(;
         size = (1080, 1080),

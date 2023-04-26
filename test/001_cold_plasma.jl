@@ -42,7 +42,7 @@ function cold_plasma_wave(;path, N=101, N_ppc=100, xmax=π, Δt=0.1, tmax=2π, a
     )
 
     E = results.E
-    n = results.ne
+    n = results.ρ
 
     contour_E = contourf(t ./ 2π, x ./ 2π, E; title = "δE / mcωp", contour_options...)
     contour_ρ = contourf(t ./ 2π, x ./ 2π, ρe .+ 1.0; title = "δn / n₀", contour_options...)

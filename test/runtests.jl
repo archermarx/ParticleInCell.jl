@@ -52,16 +52,16 @@ end
     @test length(vy) == num_particles
     @test length(Ex) == num_particles
     @test length(Ey) == num_particles
-    @test length(Bz) == num_particles
+    @test length(Bz) == 1
     @test particles.num_particles == num_particles
 
     # Check that velocities and forces are correctly initialized
-    @test all(vx[1:num_particles] .== 0.0)
-    @test all(vy[1:num_particles] .== 0.0)
-    @test all(vz[1:num_particles] .== 0.0)
-    @test all(Ex[1:num_particles] .== 0.0)
-    @test all(Ey[1:num_particles] .== 0.0)
-    @test all(Bz[1:num_particles] .== 0.0)
+    @test all(vx .== 0.0)
+    @test all(vy .== 0.0)
+    @test all(vz .== 0.0)
+    @test all(Ex .== 0.0)
+    @test all(Ey .== 0.0)
+    @test all(Bz .== 0.0)
 
     # Check that positions are uniformly-distributed
     @test isapprox(x[1], grid.Δx/2, atol = sqrt(eps(Float64)))
@@ -92,7 +92,7 @@ end
     num_gridpts = 101
     fields = ParticleInCell.Fields(num_gridpts)
 
-    (;ρ, ρe, ρi, jx, jex, jix, jy, jey, jiy, Ex, Ey, Bz, ϕ) = fields
+    (;ρ, ρe, ρi, jx, jex, jix, jy, jey, jiy, Ex, Ey, Bz) = fields
 
     # Check that arrays are correctly initialized to zero
     @test ρ == zeros(num_gridpts)
@@ -106,8 +106,7 @@ end
     @test jiy == zeros(num_gridpts)
     @test Ex == zeros(num_gridpts)
     @test Ey == zeros(num_gridpts)
-    @test Bz == zeros(num_gridpts)
-    @test ϕ == zeros(num_gridpts)
+    @test Bz == zeros(1)
 end
 
 @testset "Grid initialization" begin
@@ -230,7 +229,6 @@ end
     Ey0 = copy(fields.Ey)
     jx0 = copy(fields.jx)
     jy0 = copy(fields.jy)
-    ϕ0 = copy(fields.ϕ)
     Bz0 = copy(fields.Bz)
 
     # Run for num_timesteps timesteps to make sure nothing changes
@@ -255,7 +253,6 @@ end
     @test allapprox(Ey0, fields.Ey)
     @test allapprox(jx0, fields.jx)
     @test allapprox(jy0, fields.jy)
-    @test allapprox(ϕ0, fields.ϕ)
     @test allapprox(Bz0, fields.Bz)
 end
 
@@ -480,4 +477,71 @@ end
         @test all(isapprox.(fields.jy, 0.0, rtol = 1/particles_per_cell^2))
     end
     
+end
+
+
+#= Some code to investigate numerical convergence properties
+
+begin
+Δts = exp10.(LinRange(-4:0.25:-1))
+errs = zeros(length(Δts))
+
+for i in eachindex(Δts)
+    begin
+        #i = length(Δts)
+        # Test to make sure electric field integrator (leapfrog) is second-order accurate.
+        # Use many particles perturbed from equilibrium.
+        N = 256
+        Nppc = 1
+        Lx = 2π
+        Δx = Lx / N
+        perturbation_amplitude = Δx / 2
+        ions, electrons, fields, grid = ParticleInCell.initialize(N * Nppc, N, Lx; perturbation_wavenumber = 1, perturbation_amplitude);
+
+        p = plot()
+        scatter!(p, grid.x, fields.ρ, label = "ρ₀")
+        scatter!(p, grid.x, fields.Ex, label = "E₀")
+
+        Δt = Δts[i]
+        results = ParticleInCell.simulate(ions, electrons, fields, grid; Δt, tmax = 10π, solve_ions = false);
+    end;
+
+    begin
+        exact_solution(t) = (cos(t) - 1)
+        ind = N ÷ 2
+        x0 = results.electrons.x[ind, 1]
+        amp = x0 - grid.x[ind]
+        
+        exact = amp * exact_solution.(results.t)
+        simulated = results.electrons.x[ind, :] .- x0
+        
+        
+        p = plot(;
+            framestyle = :box,
+            xlabel = "t", ylabel = "x - x0",
+            legend = :outertop
+        )
+        plot!(results.t, exact, label = "Exact solution")
+        plot!(results.t, simulated, label = "Simulated")
+        display(p)
+        
+        errs[i] = mean((exact .- simulated).^2);
+        @show errs[i], Δt
+    end
+end
+end
+
+begin
+    first_order = Δts.^1 * errs[1] / Δts[1]
+    second_order = Δts.^2 * errs[1] / Δts[1]^2
+    p = plot(;
+        xaxis = :log, yaxis = :log, 
+        legend = :bottomright,
+        framestyle = :box,
+        xlabel = "Δt",
+        ylabel = "L2 norm of error"
+    )
+    plot!(p, Δts, first_order; ls = :dash, lc = :red, label = "First order")
+    plot!(p, Δts, second_order; ls = :dashdot, lc = :blue, label = "Second order")
+    plot!(p, Δts, errs, label = "Empirical", lc = :black, lw = 2)
 end

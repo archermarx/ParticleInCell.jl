@@ -6,6 +6,7 @@ using Plots
 using Printf
 using QuasiMonteCarlo
 using Distributions: quantile, Normal, pdf
+using ProgressMeter: @showprogress
 
 const c = 299_792_458.0
 const e = 1.602176634e-19
@@ -81,7 +82,7 @@ function Particles(num_particles::Int, grid::Grid; mass = 1, charge = 1)
     vz = zeros(num_particles)
     Ex = zeros(num_particles)
     Ey = zeros(num_particles)
-    Bz = zeros(num_particles)
+    Bz = zeros(1)
 
     # Particle weights
     N_ppc = num_particles / grid.num_gridpts
@@ -165,11 +166,9 @@ struct Fields
     jiy::Vector{Float64}
     Ex::Vector{Float64}
     Ey::Vector{Float64}
-    ϕ::Vector{Float64}
     Bz::Vector{Float64}
     # FFT quantities
     ρ̃::Vector{Complex{Float64}}
-    ϕ̃::Vector{Complex{Float64}}
     Ẽx::Vector{Complex{Float64}}
     Ẽy::Vector{Complex{Float64}}
 end
@@ -186,16 +185,16 @@ function Fields(num_gridpts::Int)
     jiy = zeros(num_gridpts)
     Ex = zeros(num_gridpts)
     Ey = zeros(num_gridpts)
-    ϕ = zeros(num_gridpts)
-    Bz = zeros(num_gridpts)
+    #ϕ = zeros(num_gridpts)
+    Bz = zeros(1)
 
     # Allocate arrays for fourier quantities
     ρ̃ = zeros(Complex{Float64}, num_gridpts)
-    ϕ̃ = zeros(Complex{Float64}, num_gridpts)
+    #ϕ̃ = zeros(Complex{Float64}, num_gridpts)
     Ẽx = zeros(Complex{Float64}, num_gridpts)
     Ẽy = zeros(Complex{Float64}, num_gridpts)
 
-    return Fields(ρ, ρi, ρe, jx, jex, jix, jy, jey, jiy, Ex, Ey, ϕ, Bz, ρ̃, ϕ̃, Ẽx, Ẽy)
+    return Fields(ρ, ρi, ρe, jx, jex, jix, jy, jey, jiy, Ex, Ey, Bz, ρ̃, Ẽx, Ẽy)
 end
 
 
@@ -209,12 +208,8 @@ function push_particles!(new_particles::Particles, particles::Particles, grid::G
     # Loop through all particles in simulation and push them to new positions and velocities
     Threads.@threads for i in 1:num_particles
 
-        t = q_m * Bz[i] * Δt / 2
+        #=t = q_m * Bz[] * Δt / 2
         s = 2 * t / (1 + t^2)
-
-        x_new = x[i] + 0.5 * vx[i] * Δt
-        y_new = y[i] + 0.5 * vy[i] * Δt
-        z_new = z[i] + 0.5 * vz[i] * Δt
 
         v_minus_x = vx[i] + 0.5 * q_m * Ex[i] * Δt
         v_minus_y = vy[i] + 0.5 * q_m * Ey[i] * Δt
@@ -229,9 +224,40 @@ function push_particles!(new_particles::Particles, particles::Particles, grid::G
         new_particles.vy[i] = v_plus_y + 0.5 * q_m * Ey[i] * Δt
         new_particles.vz[i] = vz[i]
 
-        x_new = x_new + 0.5 * new_particles.vx[i] * Δt
-        y_new = y_new + 0.5 * new_particles.vy[i] * Δt
-        z_new = z_new + 0.5 * new_particles.vz[i] * Δt
+        =#
+
+        # Boris-C algorithm from 
+        # Seiji Zenitani and Takayuki Umeda: On the Boris solver in particle-in-cell simulation (2018)
+        
+        # Eq. 3
+        ϵx = 0.5 * q_m * Ex[i]
+        ϵy = 0.5 * q_m * Ey[i]
+
+        ux⁻ = particles.vx[i] + ϵx * Δt
+        uy⁻ = particles.vy[i] + ϵy * Δt
+        uz⁻ = particles.vz[i]
+
+        # Eq. 6
+        θ = q_m * Δt * Bz[]
+        sinθ, cosθ = sincos(θ)
+
+        # Eq. 12
+        ux⁺ = ux⁻ * cosθ + uy⁻ * sinθ
+        uy⁺ = uy⁻ * cosθ - ux⁻ * sinθ
+        uz⁺ = uz⁻
+
+        # Eq. 5
+        new_particles.vx[i] = ux⁺ + ϵx * Δt
+        new_particles.vy[i] = uy⁺ + ϵy * Δt
+        new_particles.vz[i] = uz⁺
+
+        #=====================================
+        Push particle positions
+        ======================================#
+
+        x_new = x[i] + new_particles.vx[i] * Δt
+        y_new = y[i] + new_particles.vy[i] * Δt
+        z_new = z[i] + new_particles.vz[i] * Δt
 
         # Apply periodic boundary conditions for particles
         x_new = x_new - floor(x_new / Lx) * Lx
@@ -323,7 +349,7 @@ end
 function interpolate_fields_to_particles!(particles::Particles, fields::Fields, grid::Grid)
     (; Δx, num_gridpts) = grid
     (; num_particles, x) = particles
-    (; Ex, Ey, Bz) = fields
+    (; Ex, Ey) = fields
 
     Threads.@threads for i in 1:num_particles
         # Find cell center closest to but less than x[i]
@@ -332,7 +358,7 @@ function interpolate_fields_to_particles!(particles::Particles, fields::Fields, 
         # Interpolate fields on grid points to particles
         particles.Ex[i] = δⱼ * Ex[j] + δⱼ₊₁ * Ex[j_plus_1]
         particles.Ey[i] = δⱼ * Ey[j] + δⱼ₊₁ * Ey[j_plus_1]
-        particles.Bz[i] = δⱼ * Bz[j] + δⱼ₊₁ * Bz[j_plus_1]
+        #particles.Bz[i] = δⱼ * Bz[j] + δⱼ₊₁ * Bz[j_plus_1]
     end
 
     return nothing
@@ -368,35 +394,37 @@ Use FFT to compute potential and electric field using charge density
 """
 function solve_fields_on_grid!(fields::Fields, grid::Grid)
     (;num_gridpts, K, κ) = grid
-    (;ρ, ρ̃, Ex, Ey, ϕ, Ẽx, ϕ̃) = fields
+    (;ρ, ρ̃, Ex, Ey, Ẽx) = fields
 
     # Compute FFT of density
-    @. ρ̃ = ρ    
+    Threads.@threads for i in 1:num_gridpts
+        ρ̃[i] = ρ[i]
+    end
+
     fft!(ρ̃)
 
     # Compute potential and electric field in frequency domain
     Threads.@threads for j in 1:num_gridpts
         if K[j] == 0.0
-            ϕ̃[j] = 0.0
+            ϕ̃ = 0.0
         else
-            ϕ̃[j]  = ρ̃[j] / K[j]^2
+            ϕ̃ = ρ̃[j] / K[j]^2
         end
 
         if κ[j] == 0.0
             Ẽx[j] = 0.0
         else
-            Ẽx[j] = -im * κ[j] * ϕ̃[j]
+            Ẽx[j] = -im * κ[j] * ϕ̃
         end
     end
 
     # Compute inverse fourier transforms
-    ifft!(ϕ̃)
+    #ifft!(ϕ̃)
     ifft!(Ẽx)
 
-    for j in 1:num_gridpts
-        ϕ[j] = real(ϕ̃[j])
+    Threads.@threads for j in 1:num_gridpts
         Ex[j] = real(Ẽx[j])
-        Ey[j] = 0.0     # No electric field in y direction
+        Ey[j] = 0.0 # No electric field in y direction
     end
 
     return nothing
@@ -446,7 +474,9 @@ end
 
 function simulate(
         ions, electrons, fields, grid; 
-        Δt, tmax, B0 = 0.0, solve_ions = true, solve_electrons = true
+        Δt, tmax, B0 = 0.0,
+        solve_ions = true, solve_electrons = true,
+        particle_save_interval = 1,
     )
 
     N = length(fields.ρ)
@@ -456,7 +486,7 @@ function simulate(
     me = electrons.mass
 
     # Ions are updated every ion_subcycle_interval iterations
-    ion_subcycle_interval = isinf(mi) ? typemax(Int) : 1#floor(Int, sqrt(mi / me))
+    ion_subcycle_interval = isinf(mi) ? typemax(Int) : 1 #floor(Int, sqrt(mi / me))
 
     # Compute number of timesteps
     num_timesteps = ceil(Int, tmax / Δt)
@@ -470,13 +500,14 @@ function simulate(
     ρe_cache = zeros(N, num_timesteps+1)
     E_cache  = zeros(N, num_timesteps+1)
 
-    xi_cache  = zeros(N_p, num_timesteps+1)
-    vix_cache = zeros(N_p, num_timesteps+1)
-    viy_cache = zeros(N_p, num_timesteps+1)
+    num_save = num_timesteps ÷ particle_save_interval
+    xi_cache  = zeros(N_p, num_save+1)
+    vix_cache = zeros(N_p, num_save+1)
+    viy_cache = zeros(N_p, num_save+1)
 
-    xe_cache  = zeros(N_p, num_timesteps+1)
-    vex_cache = zeros(N_p, num_timesteps+1)
-    vey_cache = zeros(N_p, num_timesteps+1)
+    xe_cache  = zeros(N_p, num_save+1)
+    vex_cache = zeros(N_p, num_save+1)
+    vey_cache = zeros(N_p, num_save+1)
 
     ρi_cache[:, 1] .= fields.ρi
     ρe_cache[:, 1] .= fields.ρe
@@ -499,8 +530,10 @@ function simulate(
     ParticleInCell.apply_periodic_boundaries!(ions, grid.Lx, grid.Ly, grid.Lz)
     ParticleInCell.update!(ions, electrons, fields, grid, Δt; push_ions = false, push_electrons = false)
 
+    particle_save_iter = 2
+
     # Simulate
-    for i in 2:num_timesteps+1
+    @showprogress for i in 2:num_timesteps+1
         # Push to next timestep
         push_ions =
             solve_ions &&
@@ -518,17 +551,21 @@ function simulate(
             E_cache[j, i]  = fields.Ex[j]
         end
 
-        # Save particle quantities
-        Threads.@threads for j in 1:N_p
-            # Ions
-            xi_cache[j, i]  = ions.x[j]
-            vix_cache[j, i] = ions.vx[j]
-            viy_cache[j, i] = ions.vy[j]
+        if i % particle_save_interval == 0
+            # Save particle quantities
+            Threads.@threads for j in 1:N_p
+                # Ions
+                xi_cache[j, particle_save_iter]  = ions.x[j]
+                vix_cache[j, particle_save_iter] = ions.vx[j]
+                viy_cache[j, particle_save_iter] = ions.vy[j]
 
-            # Electrons
-            xe_cache[j, i]  = electrons.x[j]
-            vex_cache[j, i] = electrons.vx[j]
-            vey_cache[j, i] = electrons.vy[j]
+                # Electrons
+                xe_cache[j, particle_save_iter]  = electrons.x[j]
+                vex_cache[j, particle_save_iter] = electrons.vx[j]
+                vey_cache[j, particle_save_iter] = electrons.vy[j]
+            end
+
+            particle_save_iter += 1
         end
     end
 

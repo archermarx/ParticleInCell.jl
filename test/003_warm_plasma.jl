@@ -28,9 +28,9 @@ function warm_plasma_waves(;path, quiet = false, N=256, N_ppc=256, xmax=2π, Δt
     ParticleInCell.maxwellian_vdf!(electrons, thermal_velocity; quiet)
     ParticleInCell.perturb!(electrons, amplitude, wavenumber, wavespeed, xmax)
 
-    (; t, x, E, ni, ne) = ParticleInCell.simulate(ions, electrons, fields, grid; Δt, tmax)
+    (; t, x, E, ρi, ρe) = ParticleInCell.simulate(ions, electrons, fields, grid; Δt, tmax)
 
-    ρ = ne .+ ni
+    ρ = ρe .+ ρi
 
     contour_options = (;
         ylims = (0, 1), yticks = LinRange(0, 1, 6), linewidth = 0, right_margin = 30mm, 
