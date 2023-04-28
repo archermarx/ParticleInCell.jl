@@ -49,8 +49,8 @@ function ion_acoustic_wave(N_ppc, N, v_th = 0.0125; electron_drift_speed = 0.0, 
 end
 
 begin
-    N_ppc = 128 
-    mi = 100.0
+    N_ppc = 256
+    mi = 1836.0
     perturb_amp = 0.05
     ωpi = 1 / sqrt(mi)
     v_th = 0.001
@@ -62,13 +62,13 @@ begin
     perturb_k = 1 / √(2) / λd
     
     # Fit an integer number of perturbation wavelengths in the domain
-    num_wavelengths = 20
+    num_wavelengths = 40
     Lx = 2π * num_wavelengths / perturb_k
     Δx = λd / 2
     N = ceil(Int, Lx / Δx)
 
     Δt = 0.25
-    periods = 20
+    periods = 40
     tmax = 2π / ωpi * periods
     Me = 0.5
     electron_drift_speed = Me * v_th
